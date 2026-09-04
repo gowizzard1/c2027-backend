@@ -143,6 +143,34 @@ export async function setVolunteerAccessToken(id: string, token: string) {
   }
 }
 
+/** Set a volunteer's password hash (on activation). */
+export async function setVolunteerPassword(id: string, passwordHash: string) {
+  return prisma.volunteer.update({ where: { id }, data: { passwordHash } });
+}
+
+/**
+ * Reset a volunteer's access: assign a fresh token and clear their password so
+ * they can re-activate via a new invite link (admin-driven "forgot password").
+ */
+export async function regenerateVolunteerAccess(id: string, token: string) {
+  try {
+    return await prisma.volunteer.update({
+      where: { id },
+      data: { accessToken: token, passwordHash: null },
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Find a volunteer by email (case-insensitive) for password login. */
+export async function findVolunteerByEmail(email: string) {
+  return prisma.volunteer.findFirst({
+    where: { email: { equals: email.trim().toLowerCase(), mode: 'insensitive' } },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 export async function updateVolunteerStatus(id: string, status: string) {
   try {
     return await prisma.volunteer.update({ where: { id }, data: { status } });

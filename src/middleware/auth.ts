@@ -23,6 +23,46 @@ export function createSession(username: string): string {
   );
 }
 
+interface VolunteerJwtPayload {
+  sub: string;
+  role: 'volunteer';
+  vrole: string;
+  iat: number;
+  exp: number;
+}
+
+/** Session token for an authenticated volunteer (after activation or login). */
+export function createVolunteerSession(volunteerId: string, volunteerRole: string): string {
+  return jwt.sign(
+    { sub: volunteerId, role: 'volunteer', vrole: volunteerRole },
+    env().JWT_SECRET,
+    { expiresIn: '7d' },
+  );
+}
+
+/** Middleware: requires a valid volunteer JWT. Attaches req.volunteer. */
+export function requireVolunteer(req: Request, _res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new AppError(401, ErrorCode.AUTHENTICATION_REQUIRED, 'Please log in to continue.');
+  }
+  const token = authHeader.slice(7);
+  try {
+    const payload = jwt.verify(token, env().JWT_SECRET) as VolunteerJwtPayload;
+    if (payload.role !== 'volunteer') {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Invalid session.');
+    }
+    (req as any).volunteer = { id: payload.sub, role: payload.vrole };
+    next();
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    if (err instanceof jwt.TokenExpiredError) {
+      throw new AppError(401, ErrorCode.SESSION_EXPIRED, 'Session expired. Please log in again.');
+    }
+    throw new AppError(401, ErrorCode.AUTHENTICATION_REQUIRED, 'Invalid session. Please log in again.');
+  }
+}
+
 
 
 /**

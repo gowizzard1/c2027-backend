@@ -10,7 +10,7 @@ import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
 import {
   validateAdmin, getDonations, getVolunteers, getOrders,
-  updateVolunteerStatus, updateOrderStatus,
+  updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess,
   getNews, addNewsItem, updateNewsItem, deleteNewsItem,
   getProducts, addProduct, updateProduct, deleteProduct,
   getSettings, updateSettings, getDonationProgress,
@@ -106,6 +106,18 @@ router.patch('/volunteers/:id', requireAdmin, async (req: Request, res: Response
     const vol = await updateVolunteerStatus(req.params.id, status);
     if (!vol) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
     return res.json(vol);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reset a volunteer's access: new activation token + clear password (forgot-password flow).
+router.post('/volunteers/:id/reset-access', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = require('crypto').randomBytes(24).toString('base64url');
+    const vol = await regenerateVolunteerAccess(req.params.id, token);
+    if (!vol) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
+    return res.json({ success: true, accessToken: token });
   } catch (err) {
     next(err);
   }

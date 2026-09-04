@@ -39,8 +39,10 @@ model Volunteer {
   role         String
   experience   String?
   status       String   @default("pending")
-  // Unguessable per-volunteer token for the secret toolkit access link.
+  // Unguessable per-volunteer token for the account activation (set-password) link.
   accessToken  String?  @unique
+  // bcrypt hash, set when the volunteer activates their account via the invite link.
+  passwordHash String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
 
