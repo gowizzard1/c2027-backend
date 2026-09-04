@@ -21,6 +21,18 @@ import {
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
+import { sendVolunteerInvite } from '../services/email';
+import { getVolunteerById } from '../store';
+import { env } from '../lib/env';
+
+/** Build the activation + login links from the configured frontend URL. */
+function volunteerLinks(accessToken: string) {
+  const base = env().FRONTEND_URL.replace(/\/+$/, '');
+  return {
+    activationLink: `${base}/volunteer/toolkit?key=${accessToken}`,
+    loginUrl: `${base}/volunteer/login`,
+  };
+}
 
 const router = Router();
 
@@ -103,8 +115,19 @@ router.patch('/volunteers/:id', requireAdmin, async (req: Request, res: Response
   try {
     const { status } = req.body;
     if (!status) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Status is required');
+
+    const previous = await getVolunteerById(req.params.id);
     const vol = await updateVolunteerStatus(req.params.id, status);
     if (!vol) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
+
+    // Auto-email the invite the first time a volunteer becomes approved.
+    if (status === 'approved' && previous && previous.status !== 'approved' && vol.accessToken) {
+      const { activationLink, loginUrl } = volunteerLinks(vol.accessToken);
+      sendVolunteerInvite({ to: vol.email, name: vol.name, email: vol.email, activationLink, loginUrl })
+        .then(sent => logger.info({ volunteerId: vol.id, sent }, 'Volunteer invite email dispatched'))
+        .catch(err => logger.warn({ err, volunteerId: vol.id }, 'Volunteer invite email failed'));
+    }
+
     return res.json(vol);
   } catch (err) {
     next(err);
@@ -117,6 +140,13 @@ router.post('/volunteers/:id/reset-access', requireAdmin, async (req: Request, r
     const token = require('crypto').randomBytes(24).toString('base64url');
     const vol = await regenerateVolunteerAccess(req.params.id, token);
     if (!vol) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
+
+    // Email the fresh invite link automatically.
+    const { activationLink, loginUrl } = volunteerLinks(token);
+    sendVolunteerInvite({ to: vol.email, name: vol.name, email: vol.email, activationLink, loginUrl })
+      .then(sent => logger.info({ volunteerId: vol.id, sent }, 'Volunteer reset invite dispatched'))
+      .catch(err => logger.warn({ err, volunteerId: vol.id }, 'Volunteer reset invite failed'));
+
     return res.json({ success: true, accessToken: token });
   } catch (err) {
     next(err);
