@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Donation {
+  id                 String   @id @default(cuid())
+  amount             Float
+  name               String
+  email              String
+  phone              String
+  paymentMethod      String
+  status             String   @default("pending")
+  mpesaRequestId     String?  @unique
+  mpesaReceiptNumber String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
+
+  @@index([status, createdAt])
+  @@index([phone])
+  @@index([email])
+}
+
+model Volunteer {
+  id           String   @id @default(cuid())
+  name         String
+  email        String
+  phone        String
+  idNumber     String
+  county       String
+  constituency String
+  ward         String
+  role         String
+  experience   String?
+  status       String   @default("pending")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@index([status])
+  @@index([county])
+  @@index([role])
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  itemsJson       String
+  total           Float
+  name            String
+  phone           String
+  deliveryAddress String?
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  @@index([status, createdAt])
+  @@index([phone])
+}
+
+model NewsItem {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  date      String
+  category  String   @default("General")
+  type      String
+  image     String?
+  emoji     String?
+  time      String?
+  location  String?
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([category])
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  name      String
+  price     Float
+  image     String   @default("📦")
+  category  String   @default("General")
+  sizesJson String?
+  inStock   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([category, inStock])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model ManifestoItem {
+  id          String   @id @default(cuid())
+  pillar      String
+  title       String
+  description String
+  details     String?
+  icon        String   @default("📌")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([pillar])
+}
+
+model Biography {
+  id        String   @id @default(cuid())
+  section   String   @unique
+  content   String
+  updatedAt DateTime @updatedAt
+}
+
+// Interest captured while online payments are still being set up ("under integration").
+// These are people who signalled willingness to donate and want to be contacted once ready.
+model Pledge {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String
+  amount    Float?
+  message   String?
+  status    String   @default("new") // new | contacted | converted | archived
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([status, createdAt])
+  @@index([phone])
+  @@index([email])
+}

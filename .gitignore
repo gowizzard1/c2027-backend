@@ -1,0 +1,18 @@
+node_modules
+dist
+
+# Keep environment variables out of version control
+.env
+.env.local
+
+# Prisma generated
+/src/generated/prisma
+
+# Uploads (user content, not committed)
+uploads/
+
+# Logs
+*.log
+
+# Coverage
+coverage/
