@@ -70,7 +70,7 @@ export async function sendVolunteerInvite(params: {
   const text =
 `Hi ${first},
 
-You've been approved as a Campaign 2027 volunteer! 🎉
+You've been approved as a Maiywa 4 Turbo 2027 volunteer! 🎉
 
 1) Activate your account and set a password:
 ${activationLink}
@@ -80,25 +80,25 @@ ${loginUrl}
    Email: ${email}
 
 Together we rise! 🇰🇪
-— Campaign 2027`;
+— Maiywa 4 Turbo 2027`;
 
   const html =
 `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#0D0D0D">
   <div style="background:#0D0D0D;padding:20px;border-radius:12px 12px 0 0">
-    <h2 style="color:#F5C100;margin:0">Campaign 2027</h2>
+    <h2 style="color:#F5C100;margin:0">Maiywa 4 Turbo 2027</h2>
   </div>
   <div style="border:1px solid #eee;border-top:none;padding:24px;border-radius:0 0 12px 12px">
     <p>Hi ${first},</p>
-    <p>You've been <strong>approved</strong> as a Campaign 2027 volunteer! 🎉</p>
+    <p>You've been <strong>approved</strong> as a Maiywa 4 Turbo 2027 volunteer! 🎉</p>
     <p><strong>Step 1 — Activate &amp; set your password:</strong></p>
     <p><a href="${activationLink}" style="display:inline-block;background:#1A7A3C;color:#fff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:8px">Activate My Account</a></p>
     <p style="font-size:12px;color:#666">Or paste this link: ${activationLink}</p>
     <p><strong>Step 2 — Log in anytime at:</strong><br>
        <a href="${loginUrl}">${loginUrl}</a><br>
        Email: <strong>${email}</strong></p>
-    <p style="margin-top:24px">Together we rise! 🇰🇪<br>— Campaign 2027</p>
+    <p style="margin-top:24px">Together we rise! 🇰🇪<br>— Maiywa 4 Turbo 2027</p>
   </div>
 </div>`;
 
-  return sendEmail({ to, subject: "You're approved — activate your Campaign 2027 volunteer account", text, html });
+  return sendEmail({ to, subject: "You're approved — activate your Maiywa 4 Turbo 2027 volunteer account", text, html });
 }
