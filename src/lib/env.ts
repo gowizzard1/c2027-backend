@@ -45,6 +45,16 @@ const envSchema = z.object({
 
   // CORS (comma-separated origins)
   CORS_ORIGINS: z.string().optional(),
+
+  // Object storage (S3-compatible: Cloudflare R2 or AWS S3).
+  // When all required values are set, uploads go to the bucket; otherwise they
+  // fall back to local disk (fine for local dev, not for production).
+  S3_ENDPOINT: z.string().url().optional(),       // R2: https://<account>.r2.cloudflarestorage.com  (omit for AWS S3)
+  S3_REGION: z.string().optional(),               // R2: "auto"; AWS: e.g. "eu-west-1"
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_PUBLIC_URL: z.string().url().optional(),      // Public base URL for objects, e.g. https://pub-xxxx.r2.dev or CDN domain
 });
 
 export type Env = z.infer<typeof envSchema>;

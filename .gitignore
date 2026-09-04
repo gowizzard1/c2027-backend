@@ -11,6 +11,10 @@ dist
 # Uploads (user content, not committed)
 uploads/
 
+# Local SQLite database (not used in production — Postgres via DATABASE_URL)
+*.db
+*.db-journal
+
 # Logs
 *.log
 

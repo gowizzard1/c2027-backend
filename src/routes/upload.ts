@@ -1,31 +1,25 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs/promises';
 import { requireAdmin } from '../middleware/auth';
+import { isObjectStorageConfigured, putObject } from '../services/storage';
+import logger from '../lib/logger';
 
 const router = Router();
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, path.join(__dirname, '../../uploads')),
-  filename: (_req, file, cb) => {
-    // Unique filename per upload so a new photo gets a new URL. Reusing the same
-    // filename made browsers serve the stale, cached image after replacing the photo.
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    cb(null, `candidate-photo-${Date.now()}${ext}`);
-  },
-});
-
+// Keep the file in memory so we can push it to object storage or write to disk.
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     if (ALLOWED_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      // Surface a clear reason instead of silently dropping the file.
       cb(new Error('Unsupported file type. Please upload a JPEG, PNG, or WebP image.'));
     }
   },
@@ -45,11 +39,30 @@ router.post(
       next();
     });
   },
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     if (!req.file) {
       return res.status(400).json({ error: 'NO_FILE', message: 'No file uploaded.' });
     }
-    return res.json({ url: `/uploads/${req.file.filename}` });
+
+    // Unique filename so a replaced photo gets a fresh URL (avoids stale browser cache).
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const filename = `candidate-photo-${Date.now()}${ext}`;
+
+    try {
+      if (isObjectStorageConfigured()) {
+        // Production path: durable object storage (R2 / S3). Returns an absolute URL.
+        const url = await putObject(filename, req.file.buffer, req.file.mimetype);
+        return res.json({ url });
+      }
+
+      // Fallback: local disk (dev only — not durable across redeploys).
+      await fs.mkdir(UPLOADS_DIR, { recursive: true });
+      await fs.writeFile(path.join(UPLOADS_DIR, filename), req.file.buffer);
+      return res.json({ url: `/uploads/${filename}` });
+    } catch (err) {
+      logger.error({ err }, 'Failed to store uploaded file');
+      return res.status(500).json({ error: 'STORAGE_ERROR', message: 'Could not save the image. Please try again.' });
+    }
   },
 );
 
