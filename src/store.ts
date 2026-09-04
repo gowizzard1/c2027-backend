@@ -109,6 +109,7 @@ export async function addVolunteer(data: {
   ward: string;
   role: string;
   experience?: string;
+  accessToken?: string;
 }) {
   return prisma.volunteer.create({ data });
 }
@@ -120,6 +121,26 @@ export async function getVolunteers(options: PaginationOptions = {}) {
     skip: (page - 1) * limit,
     take: limit,
   });
+}
+
+export async function getVolunteerById(id: string) {
+  return prisma.volunteer.findUnique({ where: { id } });
+}
+
+// ---- Volunteer secret toolkit access link ----
+/** Look up a volunteer by their unguessable access token (used by the toolkit link). */
+export async function findVolunteerByAccessToken(token: string) {
+  if (!token) return null;
+  return prisma.volunteer.findUnique({ where: { accessToken: token } });
+}
+
+/** Assign (or reset) a volunteer's access token. */
+export async function setVolunteerAccessToken(id: string, token: string) {
+  try {
+    return await prisma.volunteer.update({ where: { id }, data: { accessToken: token } });
+  } catch {
+    return null;
+  }
 }
 
 export async function updateVolunteerStatus(id: string, status: string) {
@@ -241,9 +262,9 @@ export async function deleteProduct(id: string) {
 
 // ---- Campaign Settings ----
 const DEFAULT_SETTINGS = {
-  siteName: 'Campaign 2027',
-  tagline: 'Together We Rise',
-  heroTitle: 'Together We Rise',
+  siteName: 'Isaac K. Maiywa',
+  tagline: 'Kirgit Kipkeleny Tulwo',
+  heroTitle: 'Kirgit Kipkeleny Tulwo',
   heroSubtitle: 'A vision of prosperity, unity, and progress for every citizen.',
   donationGoal: 10000000,
   whatsappLink: '',
@@ -251,6 +272,10 @@ const DEFAULT_SETTINGS = {
   contactPhone: '',
   address: '',
   candidatePhoto: '',
+  // Social-media volunteer team: group invite link + default share content.
+  socialGroupLink: '',
+  socialShareMessage: '',
+  socialShareUrl: '',
   visionItems: [] as { icon: string; title: string; description: string }[],
 };
 
@@ -270,6 +295,9 @@ export async function getSettings() {
     contactPhone: map.contactPhone ?? DEFAULT_SETTINGS.contactPhone,
     address: map.address ?? DEFAULT_SETTINGS.address,
     candidatePhoto: map.candidatePhoto ?? DEFAULT_SETTINGS.candidatePhoto,
+    socialGroupLink: map.socialGroupLink ?? DEFAULT_SETTINGS.socialGroupLink,
+    socialShareMessage: map.socialShareMessage ?? DEFAULT_SETTINGS.socialShareMessage,
+    socialShareUrl: map.socialShareUrl ?? DEFAULT_SETTINGS.socialShareUrl,
     visionItems: map.visionItems ? JSON.parse(map.visionItems) : DEFAULT_SETTINGS.visionItems,
   };
 }

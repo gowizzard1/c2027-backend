@@ -1,0 +1,110 @@
+{
+  "settings": {
+    "heroTitle": "A Practical Agenda for Turbo",
+    "heroSubtitle": "A development platform focused on education, opportunity, infrastructure, agriculture, healthcare and accountable representation."
+  },
+  "biography": {
+    "summary": "Isaac Kiptanui Maiywa is a technology professional, community-minded leader and advocate for inclusive development. With a background in software engineering and a strong connection to Turbo, he brings a modern, solutions-oriented perspective to public leadership.",
+    "background": "Technology • Software Engineering • Community Engagement • Youth Development\n\nIsaac has built his professional experience in technology and software engineering, working with modern digital platforms and solving complex problems through innovation and practical solutions. His experience in technology has shaped his belief that young people need access to quality education, skills, connectivity and meaningful economic opportunities.\n\nBeyond his professional career, he has remained engaged with community issues and the aspirations of residents of Turbo, particularly around education, infrastructure, employment and representation.",
+    "why": "I believe Turbo deserves leadership that listens, understands today's challenges and approaches development with a practical, forward-looking mindset. I am stepping forward to offer my experience, energy and commitment to public service and to contribute to a stronger future for our constituency.",
+    "vision": "A prosperous, connected and empowered Turbo where every young person has an opportunity to build a meaningful future, families can access essential services, farmers can prosper, businesses can grow, and residents have accountable and effective representation."
+  },
+  "manifesto": [
+    {
+      "pillar": "EDUCATION",
+      "icon": "🎓",
+      "title": "Expand Access to Quality Education",
+      "description": "Strengthen educational opportunity for students across Turbo through better access, infrastructure, skills and targeted support.",
+      "details": "Strengthen access to constituency bursaries and scholarships through transparent, needs-based processes.\nAdvocate for improved infrastructure in schools, including classrooms, laboratories, sanitation and digital learning facilities.\nPromote technical and vocational education for young people who choose skills-based careers.\nSupport mentorship, career guidance and digital-skills programmes.\nPublish clear information on available education opportunities and beneficiaries.",
+      "sortOrder": 1
+    },
+    {
+      "pillar": "YOUTH & EMPLOYMENT",
+      "icon": "💼",
+      "title": "Turn Youth Potential into Opportunity",
+      "description": "Create stronger pathways from education and talent to employment, entrepreneurship and the digital economy.",
+      "details": "Support youth entrepreneurship and business development programmes.\nPromote digital skills, coding, AI, freelancing and remote-work opportunities.\nAdvocate for transparent access to government youth programmes.\nSupport sports and creative industries as avenues for talent and income.\nBuild partnerships with private-sector organisations for internships, apprenticeships and skills development.",
+      "sortOrder": 2
+    },
+    {
+      "pillar": "AGRICULTURE",
+      "icon": "🌾",
+      "title": "Strengthen Farmers and Agricultural Value Chains",
+      "description": "Improve productivity, market access and value addition for farmers and livestock keepers.",
+      "details": "Advocate for better agricultural extension services.\nPromote climate-smart and technology-enabled farming.\nStrengthen farmer access to reliable markets and market information.\nEncourage agro-processing and value addition within the constituency.\nSupport initiatives addressing post-harvest losses and livestock development.",
+      "sortOrder": 3
+    },
+    {
+      "pillar": "ROADS & INFRASTRUCTURE",
+      "icon": "🛣️",
+      "title": "Better Infrastructure, Better Connectivity",
+      "description": "Advocate for improved roads, water, electricity and digital infrastructure across Turbo.",
+      "details": "Identify priority roads requiring construction, rehabilitation or maintenance.\nWork with relevant national and county agencies to pursue infrastructure projects.\nAdvocate for improved access to clean and reliable water.\nPromote expansion of electricity and internet connectivity.\nMaintain a publicly accessible record of major infrastructure priorities and progress.",
+      "sortOrder": 4
+    },
+    {
+      "pillar": "HEALTHCARE",
+      "icon": "🏥",
+      "title": "Accessible and Dignified Healthcare",
+      "description": "Advocate for better-equipped health facilities and improved access to essential healthcare services.",
+      "details": "Advocate for adequate staffing and equipment in health facilities.\nSupport improved access to essential medicines and diagnostic services.\nPromote maternal, child and preventive healthcare.\nStrengthen health-awareness and community outreach programmes.\nWork with relevant government agencies to address gaps identified by residents.",
+      "sortOrder": 5
+    },
+    {
+      "pillar": "SMALL BUSINESSES & ENTERPRISE",
+      "icon": "🏪",
+      "title": "Build a Strong Local Economy",
+      "description": "Create an environment where small businesses, traders and entrepreneurs can start, grow and employ others.",
+      "details": "Promote entrepreneurship training and financial literacy.\nAdvocate for improved trading facilities and business infrastructure.\nConnect local entrepreneurs with markets, investors and relevant government programmes.\nEncourage digital adoption among small businesses.\nSupport initiatives that promote local production and value addition.",
+      "sortOrder": 6
+    },
+    {
+      "pillar": "WOMEN & FAMILIES",
+      "icon": "👩🏽‍👧🏽",
+      "title": "Expand Economic Opportunities for Women",
+      "description": "Support programmes that improve women's economic participation, skills and access to opportunity.",
+      "details": "Promote entrepreneurship and skills development programmes.\nImprove awareness of available government financing and support programmes.\nEncourage women-led cooperatives and businesses.\nSupport initiatives addressing barriers to women's participation in the economy.",
+      "sortOrder": 7
+    },
+    {
+      "pillar": "SPORTS & CREATIVE ARTS",
+      "icon": "⚽",
+      "title": "Talent as an Economic Opportunity",
+      "description": "Build pathways for talented young people to develop their skills and turn talent into sustainable careers.",
+      "details": "Support grassroots sporting activities and talent identification.\nPromote access to sporting facilities and equipment.\nSupport creative arts, music, film and cultural activities.\nConnect talented young people with competitions, training and professional opportunities.\nEncourage partnerships with private organisations and sporting bodies.",
+      "sortOrder": 8
+    },
+    {
+      "pillar": "DIGITAL TURBO",
+      "icon": "💻",
+      "title": "Make Turbo Part of the Digital Economy",
+      "description": "Equip residents with the connectivity and digital skills required for the modern economy.",
+      "details": "Promote digital literacy programmes.\nSupport training in software development, AI, cybersecurity and digital entrepreneurship.\nAdvocate for improved internet connectivity.\nEncourage young people to access global digital-work opportunities.\nPromote digital access to information about government services and opportunities.",
+      "sortOrder": 9
+    },
+    {
+      "pillar": "ACCOUNTABILITY & TRANSPARENCY",
+      "icon": "⚖️",
+      "title": "An Open and Accountable Constituency Office",
+      "description": "Make public participation, transparency and measurable results central to constituency leadership.",
+      "details": "Provide regular public reports on constituency programmes and projects.\nMaintain transparent criteria for programmes administered through the constituency office.\nEstablish channels through which residents can submit issues and track responses.\nHold regular public consultations across the constituency.\nPublish progress against stated priorities and commitments.",
+      "sortOrder": 10
+    },
+    {
+      "pillar": "ENVIRONMENT",
+      "icon": "🌱",
+      "title": "Protect Our Environment and Future",
+      "description": "Promote sustainable development, environmental conservation and climate resilience.",
+      "details": "Promote tree planting and environmental conservation.\nEncourage sustainable agricultural practices.\nSupport community environmental initiatives.\nPromote awareness of climate-related risks and adaptation measures.\nAdvocate for responsible development and protection of natural resources.",
+      "sortOrder": 11
+    },
+    {
+      "pillar": "REPRESENTATION & LEGISLATION",
+      "icon": "🏛️",
+      "title": "Stronger Representation for Turbo",
+      "description": "Make the constituency's priorities visible in Parliament through effective legislation, oversight and representation.",
+      "details": "Represent constituency concerns in parliamentary debates and committees.\nAdvocate for legislation addressing issues affecting residents.\nExercise parliamentary oversight over national government programmes and expenditure.\nRegularly communicate parliamentary activity and outcomes to constituents.\nEstablish a structured mechanism for collecting and prioritising issues raised by residents.",
+      "sortOrder": 12
+    }
+  ]
+}

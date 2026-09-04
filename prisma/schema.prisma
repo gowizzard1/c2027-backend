@@ -39,6 +39,8 @@ model Volunteer {
   role         String
   experience   String?
   status       String   @default("pending")
+  // Unguessable per-volunteer token for the secret toolkit access link.
+  accessToken  String?  @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
 
@@ -134,3 +136,5 @@ model Pledge {
   @@index([phone])
   @@index([email])
 }
+
+

@@ -162,6 +162,10 @@ export const settingsSchema = z.object({
   contactPhone: z.union([z.literal(''), phoneSchema]).optional(),
   address: z.string().max(300).optional(),
   candidatePhoto: z.string().max(500).optional(),
+  // Social-media volunteer team config
+  socialGroupLink: z.string().max(300).optional(),
+  socialShareMessage: z.string().max(500).optional(),
+  socialShareUrl: z.string().max(300).optional(),
   visionItems: z.array(z.object({
     icon: z.string(),
     title: z.string(),
