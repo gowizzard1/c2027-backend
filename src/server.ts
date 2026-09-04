@@ -26,6 +26,11 @@ validateEnv();
 const app = express();
 const PORT = env().PORT;
 
+// Railway/Vercel sit behind a reverse proxy and forward the client IP via
+// X-Forwarded-For. Trust exactly one proxy hop so express-rate-limit can apply
+// limits per real client without rejecting proxied requests.
+app.set('trust proxy', 1);
+
 // ── Security middleware ──────────────────────────────────────────────
 app.use(securityHeaders);
 app.use(requestId);

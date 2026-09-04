@@ -60,7 +60,7 @@ interface SendArgs {
   html?: string;
 }
 
-async function sendEmail({ to, subject, text, html }: SendArgs): Promise<boolean> {
+async function sendEmail({ to, subject, text, html }: SendArgs) {
   if (!isEmailConfigured()) {
     logger.warn({ to, subject }, '[Email MOCK] SMTP not configured — email not sent');
     console.log(`[Email MOCK] To: ${to}\nSubject: ${subject}\n${text}`);

@@ -10,7 +10,7 @@ import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
 import {
   validateAdmin, getDonations, getVolunteers, getOrders,
-  updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess,
+  updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess, deleteVolunteer,
   getNews, addNewsItem, updateNewsItem, deleteNewsItem,
   getProducts, addProduct, updateProduct, deleteProduct,
   getSettings, updateSettings, getDonationProgress,
@@ -148,6 +148,18 @@ router.post('/volunteers/:id/reset-access', requireAdmin, async (req: Request, r
       .catch(err => logger.warn({ err, volunteerId: vol.id }, 'Volunteer reset invite failed'));
 
     return res.json({ success: true, accessToken: token });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Permanently delete a volunteer and revoke their access.
+router.delete('/volunteers/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = await deleteVolunteer(req.params.id);
+    if (!deleted) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
+    logger.info({ volunteerId: req.params.id }, 'Volunteer deleted by admin');
+    return res.json({ success: true });
   } catch (err) {
     next(err);
   }

@@ -32,7 +32,9 @@ async function toolkitPayload(volunteer: any) {
   if (approvedSocial) {
     const settings = await getSettings();
     social = {
-      groupLink: settings.socialGroupLink || '',
+      // Prefer the dedicated social team group; fall back to the campaign WhatsApp
+      // group so configured existing settings remain useful in the portal.
+      groupLink: settings.socialGroupLink || settings.whatsappLink || '',
       shareMessage: settings.socialShareMessage || '',
       shareUrl: settings.socialShareUrl || '',
     };

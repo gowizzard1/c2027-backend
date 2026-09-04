@@ -179,6 +179,16 @@ export async function updateVolunteerStatus(id: string, status: string) {
   }
 }
 
+/** Permanently remove a volunteer and their account access. */
+export async function deleteVolunteer(id: string) {
+  try {
+    await prisma.volunteer.delete({ where: { id } });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---- Orders ----
 export async function addOrder(data: {
   id: string;
