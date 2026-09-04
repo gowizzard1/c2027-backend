@@ -4,6 +4,7 @@
  * so the app never crashes and the invite content is still visible.
  */
 import nodemailer, { Transporter } from 'nodemailer';
+import { promises as dns } from 'dns';
 import logger from '../lib/logger';
 
 let transporter: Transporter | null = null;
@@ -12,17 +13,38 @@ export function isEmailConfigured(): boolean {
   return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 }
 
-function getTransport(): Transporter {
+async function getTransport(): Promise<Transporter> {
   if (transporter) return transporter;
+
+  const smtpHost = process.env.SMTP_HOST!;
   const port = Number(process.env.SMTP_PORT || 465);
+  let connectionHost = smtpHost;
+
+  // Railway containers may receive an unreachable IPv6 address for smtp.gmail.com.
+  // Resolve IPv4 explicitly, but preserve the hostname as the TLS SNI name so Gmail's
+  // certificate continues to validate correctly.
+  try {
+    const [ipv4] = await dns.resolve4(smtpHost);
+    if (ipv4) {
+      connectionHost = ipv4;
+      logger.debug({ smtpHost, ipv4 }, 'Resolved SMTP host to IPv4');
+    }
+  } catch (err) {
+    // Fall back to the hostname; this remains useful for SMTP providers that don't
+    // publish an A record or environments where DNS resolution is unavailable.
+    logger.warn({ err, smtpHost }, 'Could not resolve SMTP host to IPv4; using hostname');
+  }
+
   transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host: connectionHost,
     port,
     secure: port === 465, // 465 = implicit TLS; 587 = STARTTLS
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    // Required when connecting to an IP address over TLS (SNI / certificate validation).
+    tls: { servername: smtpHost },
   });
   return transporter;
 }
@@ -45,10 +67,13 @@ async function sendEmail({ to, subject, text, html }: SendArgs): Promise<boolean
     return false;
   }
   try {
-    await getTransport().sendMail({ from: fromAddress(), to, subject, text, html });
+    const smtp = await getTransport();
+    await smtp.sendMail({ from: fromAddress(), to, subject, text, html });
     logger.info({ to, subject }, 'Email sent');
     return true;
   } catch (err) {
+    // Do not reuse a failed connection/client on the next approval attempt.
+    transporter = null;
     logger.error({ err, to }, 'Email send failed');
     return false;
   }
