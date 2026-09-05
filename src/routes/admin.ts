@@ -29,6 +29,7 @@ import {
   getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
   getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
   archiveElectionCandidate, restoreElectionCandidate,
+  deleteElectionCandidate,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
@@ -303,6 +304,17 @@ router.post('/election-candidates/:id/restore', requireAdmin, async (req: Reques
     const candidate = await restoreElectionCandidate(req.params.id);
     if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived candidate not found.');
     return res.json(candidate);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/election-candidates/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = await deleteElectionCandidate(req.params.id);
+    if (!deleted) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Could not delete this candidate. Archive it instead if you need to preserve it.');
+    logger.info({ candidateId: req.params.id }, 'Election candidate deleted by admin');
+    return res.json({ success: true });
   } catch (err) {
     next(err);
   }

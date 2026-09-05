@@ -1303,9 +1303,9 @@ export async function getPublicVerifiedPollingResults() {
   });
 
   const candidateRecords = await prisma.electionCandidate.findMany({
-    select: { id: true, name: true, party: true, imageUrl: true },
+    select: { id: true, name: true, party: true, imageUrl: true, active: true, archivedAt: true },
   });
-  const candidateImages = new Map(candidateRecords.map(candidate => [candidate.id, candidate.imageUrl]));
+  const candidateRegistry = new Map(candidateRecords.map(candidate => [candidate.id, candidate]));
 
   // Only the newest verified report for each station contributes to public totals.
   const byStation = new Map<string, typeof verifiedReports[number]>();
@@ -1327,11 +1327,15 @@ export async function getPublicVerifiedPollingResults() {
     try {
       const votes = JSON.parse(report.candidateVotesJson) as { candidateId: string; candidateName: string; party?: string | null; votes: number }[];
       for (const vote of votes) {
+        const registryCandidate = candidateRegistry.get(vote.candidateId);
+        // Public results only show candidates that are currently active and not archived.
+        // Deleted candidates have no registry row and are excluded as well.
+        if (!registryCandidate || !registryCandidate.active || registryCandidate.archivedAt) continue;
         const current = candidates.get(vote.candidateId) || {
           id: vote.candidateId,
-          name: vote.candidateName,
-          party: vote.party || null,
-          imageUrl: candidateImages.get(vote.candidateId) || null,
+          name: registryCandidate.name,
+          party: registryCandidate.party || vote.party || null,
+          imageUrl: registryCandidate.imageUrl || null,
           votes: 0,
         };
         current.votes += Number(vote.votes) || 0;
@@ -1374,5 +1378,15 @@ export async function archivePollingResultReport(id: string, archivedBy: string,
     });
   } catch {
     return null;
+  }
+}
+
+/** Permanently delete a candidate registry entry. Historical result snapshots retain name/vote data. */
+export async function deleteElectionCandidate(id: string) {
+  try {
+    await prisma.electionCandidate.delete({ where: { id } });
+    return true;
+  } catch {
+    return false;
   }
 }
