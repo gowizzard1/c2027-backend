@@ -82,6 +82,9 @@ router.get('/activation', authLimiter, async (req: Request, res: Response, next:
     if (!volunteer) {
       return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
     }
+    if (volunteer.status === 'archived') {
+      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
+    }
     return res.json({
       valid: true,
       name: volunteer.name,
@@ -113,6 +116,9 @@ router.post('/activate', authLimiter, async (req: Request, res: Response, next: 
     const volunteer = await findVolunteerByAccessToken(key);
     if (!volunteer) {
       return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
+    }
+    if (volunteer.status === 'archived') {
+      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
     }
     if (volunteer.passwordHash) {
       return res.status(409).json({ error: 'ALREADY_ACTIVATED', message: 'This account already has a password. Please log in instead.' });
@@ -151,6 +157,9 @@ router.post('/login', authLimiter, async (req: Request, res: Response, next: Nex
       await recordVolunteerLoginFailure(volunteer.id);
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' });
     }
+    if (volunteer.status === 'archived') {
+      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
+    }
 
     await recordVolunteerLoginSuccess(volunteer.id);
     const token = createVolunteerSession(volunteer.id, volunteer.role);
@@ -170,6 +179,9 @@ router.get('/me', requireVolunteer, async (req: Request, res: Response, next: Ne
     const { id } = (req as any).volunteer as { id: string };
     const volunteer = await getVolunteerById(id);
     if (!volunteer) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer record not found.');
+    if (volunteer.status === 'archived') {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'This volunteer account has been archived.');
+    }
     return res.json(await toolkitPayload(volunteer));
   } catch (err) {
     next(err);

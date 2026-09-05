@@ -114,15 +114,17 @@ export async function addVolunteer(data: {
   return prisma.volunteer.create({ data });
 }
 
-export async function getVolunteers(options: PaginationOptions = {}) {
-  const { page = 1, limit = 50 } = options;
+export async function getVolunteers(options: PaginationOptions & { archived?: boolean } = {}) {
+  const { page = 1, limit = 50, archived = false } = options;
   return prisma.volunteer.findMany({
+    where: archived ? { status: 'archived' } : { status: { not: 'archived' } },
     // Explicitly omit passwordHash. Admins need support/activity information, but
     // password hashes must never leave the server, even through an admin endpoint.
     select: {
       id: true, name: true, email: true, phone: true, idNumber: true,
       county: true, constituency: true, ward: true, role: true, experience: true,
       status: true, accessToken: true, createdAt: true, updatedAt: true,
+      archivedAt: true, statusBeforeArchive: true,
       inviteDeliveryStatus: true, inviteSentAt: true, inviteFailedAt: true,
       activatedAt: true, lastLoginAt: true, lastLoginFailedAt: true, loginFailureCount: true,
     },
@@ -222,13 +224,39 @@ export async function updateVolunteerStatus(id: string, status: string) {
   }
 }
 
-/** Permanently remove a volunteer and their account access. */
-export async function deleteVolunteer(id: string) {
+/** Archive a volunteer without deleting their data or account history. */
+export async function archiveVolunteer(id: string) {
   try {
-    await prisma.volunteer.delete({ where: { id } });
-    return true;
+    const volunteer = await prisma.volunteer.findUnique({ where: { id } });
+    if (!volunteer || volunteer.status === 'archived') return null;
+    return await prisma.volunteer.update({
+      where: { id },
+      data: {
+        statusBeforeArchive: volunteer.status,
+        status: 'archived',
+        archivedAt: new Date(),
+      },
+    });
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** Restore a volunteer to the status they held before being archived. */
+export async function restoreVolunteer(id: string) {
+  try {
+    const volunteer = await prisma.volunteer.findUnique({ where: { id } });
+    if (!volunteer || volunteer.status !== 'archived') return null;
+    return await prisma.volunteer.update({
+      where: { id },
+      data: {
+        status: volunteer.statusBeforeArchive || 'pending',
+        statusBeforeArchive: null,
+        archivedAt: null,
+      },
+    });
+  } catch {
+    return null;
   }
 }
 

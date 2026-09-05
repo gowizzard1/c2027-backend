@@ -10,7 +10,7 @@ import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
 import {
   validateAdmin, getDonations, getVolunteers, getOrders,
-  updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess, deleteVolunteer,
+  updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess, archiveVolunteer, restoreVolunteer,
   recordVolunteerInviteResult,
   getNews, addNewsItem, updateNewsItem, deleteNewsItem,
   getProducts, addProduct, updateProduct, deleteProduct,
@@ -105,7 +105,8 @@ router.get('/volunteers', requireAdmin, async (req: Request, res: Response, next
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
-    const volunteers = await getVolunteers({ page, limit });
+    const archived = req.query.archived === 'true';
+    const volunteers = await getVolunteers({ page, limit, archived });
     return res.json(volunteers);
   } catch (err) {
     next(err);
@@ -115,14 +116,21 @@ router.get('/volunteers', requireAdmin, async (req: Request, res: Response, next
 router.patch('/volunteers/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status } = req.body;
-    if (!status) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Status is required');
+    const allowedStatuses = ['approved', 'rejected', 'suspended'];
+    if (!allowedStatuses.includes(status)) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'status must be approved, rejected, or suspended');
+    }
 
     const previous = await getVolunteerById(req.params.id);
+    if (!previous || previous.status === 'archived') {
+      throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
+    }
     const vol = await updateVolunteerStatus(req.params.id, status);
     if (!vol) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
 
-    // Auto-email the invite the first time a volunteer becomes approved.
-    if (status === 'approved' && previous && previous.status !== 'approved' && vol.accessToken) {
+    // Auto-email an invite for first-time approval or a reconsidered rejected application,
+    // but do not re-send it merely because a suspended volunteer is unsuspended.
+    if (status === 'approved' && previous && previous.status !== 'approved' && previous.status !== 'suspended' && vol.accessToken) {
       const { activationLink, loginUrl } = volunteerLinks(vol.accessToken);
       sendVolunteerInvite({ to: vol.email, name: vol.name, email: vol.email, activationLink, loginUrl })
         .then(async sent => {
@@ -166,13 +174,24 @@ router.post('/volunteers/:id/reset-access', requireAdmin, async (req: Request, r
   }
 });
 
-// Permanently delete a volunteer and revoke their access.
-router.delete('/volunteers/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+// Reversible archive — removes volunteer from the active list but preserves history.
+router.post('/volunteers/:id/archive', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deleted = await deleteVolunteer(req.params.id);
-    if (!deleted) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found');
-    logger.info({ volunteerId: req.params.id }, 'Volunteer deleted by admin');
-    return res.json({ success: true });
+    const volunteer = await archiveVolunteer(req.params.id);
+    if (!volunteer) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer not found or already archived');
+    logger.info({ volunteerId: volunteer.id, previousStatus: volunteer.statusBeforeArchive }, 'Volunteer archived by admin');
+    return res.json(volunteer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/volunteers/:id/restore', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const volunteer = await restoreVolunteer(req.params.id);
+    if (!volunteer) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived volunteer not found');
+    logger.info({ volunteerId: volunteer.id, restoredStatus: volunteer.status }, 'Volunteer restored by admin');
+    return res.json(volunteer);
   } catch (err) {
     next(err);
   }
