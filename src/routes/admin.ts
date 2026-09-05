@@ -33,6 +33,7 @@ import { isCardConfigured } from '../services/card';
 import { sendVolunteerInvite } from '../services/email';
 import { getVolunteerById } from '../store';
 import { env } from '../lib/env';
+import { isTurboWard, TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS } from '../lib/polling';
 
 /** Build the activation + login links from the configured frontend URL. */
 function volunteerLinks(accessToken: string) {
@@ -194,18 +195,23 @@ router.post('/volunteer-assignments/:id/restore', requireAdmin, async (req: Requ
 router.get('/polling-stations', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const includeInactive = req.query.includeInactive === 'true';
-    return res.json(await getPollingStations(includeInactive));
+    const stations = await getPollingStations(includeInactive);
+    return res.json(stations.map(station => ({ ...station, validWard: isTurboWard(station.ward) })));
   } catch (err) {
     next(err);
   }
+});
+
+router.get('/polling-station-config', requireAdmin, async (_req: Request, res: Response) => {
+  return res.json({ county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY, wards: TURBO_WARDS });
 });
 
 router.post('/polling-stations', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const ward = typeof req.body?.ward === 'string' ? req.body.ward.trim() : '';
-    if (!name || !ward || name.length > 150 || ward.length > 100) {
-      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Station name and ward are required.');
+    if (!name || !ward || name.length > 150 || ward.length > 100 || !isTurboWard(ward)) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, `Station name and an official Turbo ward are required: ${TURBO_WARDS.join(', ')}.`);
     }
     return res.status(201).json(await addPollingStation({ name, ward }));
   } catch (err) {

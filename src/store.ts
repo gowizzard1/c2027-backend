@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import prisma from './db';
 import logger from './lib/logger';
+import { TURBO_COUNTY, TURBO_CONSTITUENCY, isTurboWard } from './lib/polling';
 
 // ---- Types (re-exported for route use) ----
 export type { Donation, Volunteer, Order, NewsItem, Product, Setting } from '@prisma/client';
@@ -1081,21 +1082,25 @@ export async function getVolunteerAccountStats() {
 
 // ---- Turbo polling station registry ----
 export async function getPollingStations(includeInactive = false) {
-  return prisma.pollingStation.findMany({
+  const stations = await prisma.pollingStation.findMany({
     where: includeInactive ? {} : { active: true },
     orderBy: [{ ward: 'asc' }, { name: 'asc' }],
   });
+  // Public polling-agent registration must only receive stations in the official ward set.
+  // Admin views include legacy/manual entries so they can be reviewed and deactivated.
+  return includeInactive ? stations : stations.filter(station => isTurboWard(station.ward));
 }
 
 export async function getActiveTurboPollingStation(id: string) {
-  return prisma.pollingStation.findFirst({
-    where: { id, active: true, county: 'Uasin Gishu', constituency: 'Turbo' },
+  const station = await prisma.pollingStation.findFirst({
+    where: { id, active: true, county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY },
   });
+  return station && isTurboWard(station.ward) ? station : null;
 }
 
 export async function addPollingStation(data: { name: string; ward: string }) {
   return prisma.pollingStation.create({
-    data: { name: data.name.trim(), ward: data.ward.trim(), county: 'Uasin Gishu', constituency: 'Turbo' },
+    data: { name: data.name.trim(), ward: data.ward.trim(), county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY },
   });
 }
 

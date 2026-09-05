@@ -14,6 +14,7 @@ import { authLimiter } from '../middleware/security';
 import { createVolunteerSession, requireVolunteer } from '../middleware/auth';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
+import { TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS } from '../lib/polling';
 
 const router = Router();
 
@@ -93,6 +94,11 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
   };
 }
 
+/** Public eligibility metadata for the controlled Turbo polling-agent form. */
+router.get('/polling-config', async (_req: Request, res: Response) => {
+  return res.json({ county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY, wards: TURBO_WARDS });
+});
+
 /** Public active official Turbo polling stations for the polling-agent registration form. */
 router.get('/polling-stations', async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -111,7 +117,7 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
     let stationId: string | undefined;
 
     if (role === 'polling_agent') {
-      if (county.trim().toLowerCase() !== 'uasin gishu' || constituency.trim().toLowerCase() !== 'turbo') {
+      if (county.trim().toLowerCase() !== TURBO_COUNTY.toLowerCase() || constituency.trim().toLowerCase() !== TURBO_CONSTITUENCY.toLowerCase()) {
         return res.status(400).json({
           error: 'POLLING_AGENT_LOCATION_REQUIRED',
           message: 'Polling agents must be registered for Uasin Gishu County and Turbo Constituency.',

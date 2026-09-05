@@ -261,6 +261,7 @@ model VolunteerRoleAssignment {
   updatedAt           DateTime @updatedAt
 
   mobilizerReports    MobilizerReport[]
+  pollingResults      PollingResultReport[]
 
   @@unique([accountId, role])
   @@index([status])
@@ -281,7 +282,58 @@ model PollingStation {
   updatedAt    DateTime @updatedAt
 
   assignments  VolunteerRoleAssignment[]
+  resultReports PollingResultReport[]
 
   @@unique([name, ward])
   @@index([active, ward])
+}
+
+// Admin-managed candidate registry for an election reporting period.
+model ElectionCandidate {
+  id        String   @id @default(cuid())
+  name      String
+  party     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, party])
+  @@index([active, name])
+}
+
+// Private polling-station result reported by an assigned polling agent.
+// This is an internal agent report, not an official public declaration.
+model PollingResultReport {
+  id                 String   @id @default(cuid())
+  assignmentId       String
+  assignment         VolunteerRoleAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  pollingStationId   String
+  pollingStation     PollingStation @relation(fields: [pollingStationId], references: [id], onDelete: Restrict)
+  revisionNumber     Int      @default(1)
+  status             String   @default("submitted") // submitted | under_review | verified | disputed | superseded
+  candidateVotesJson String
+  validVotes         Int
+  rejectedVotes      Int      @default(0)
+  notes              String?
+  reviewNote         String?
+  submittedAt        DateTime @default(now())
+  reviewedAt         DateTime?
+  attachments        PollingResultAttachment[]
+
+  @@unique([assignmentId, revisionNumber])
+  @@index([pollingStationId, submittedAt])
+  @@index([status, submittedAt])
+}
+
+// Private object-storage evidence attachment. Object key is never returned publicly.
+model PollingResultAttachment {
+  id           String   @id @default(cuid())
+  reportId     String
+  report       PollingResultReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  objectKey    String   @unique
+  mimeType     String
+  originalName String
+  createdAt    DateTime @default(now())
+
+  @@index([reportId])
 }
