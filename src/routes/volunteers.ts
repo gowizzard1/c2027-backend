@@ -29,18 +29,19 @@ function generateAccessToken(): string {
 
 /** Shape the authenticated toolkit payload for a volunteer, gating social content. */
 async function toolkitPayload(volunteer: any) {
+  const configuredSettings = await getSettings();
   const approvedSocial = volunteer.role === 'social_media' && volunteer.status === 'approved';
   let social: { groupLink: string; shareMessage: string; shareUrl: string } | null = null;
   if (approvedSocial) {
-    const settings = await getSettings();
     social = {
       // Prefer the dedicated social team group; fall back to the campaign WhatsApp
       // group so configured existing settings remain useful in the portal.
-      groupLink: settings.socialGroupLink || settings.whatsappLink || '',
-      shareMessage: settings.socialShareMessage || '',
-      shareUrl: settings.socialShareUrl || '',
+      groupLink: configuredSettings.socialGroupLink || configuredSettings.whatsappLink || '',
+      shareMessage: configuredSettings.socialShareMessage || '',
+      shareUrl: configuredSettings.socialShareUrl || '',
     };
   }
+  const configuredActivationDelayDays = Math.max(0, Number(configuredSettings.stipendActivationDelayDays) || 0);
   const stipend = volunteer.status === 'approved'
     ? await getVolunteerStipendStatus(volunteer.id)
     : {
@@ -48,6 +49,8 @@ async function toolkitPayload(volunteer: any) {
         reason: 'Mobile-data stipend requests are available after volunteer approval.',
         nextEligibleAt: null,
         latestRequest: null,
+        activationDelayDays: configuredActivationDelayDays,
+        repeatCooldownDays: 7,
       };
 
   return {

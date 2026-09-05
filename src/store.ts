@@ -124,7 +124,7 @@ export async function getVolunteers(options: PaginationOptions & { archived?: bo
       id: true, name: true, email: true, phone: true, idNumber: true,
       county: true, constituency: true, ward: true, role: true, experience: true,
       status: true, accessToken: true, createdAt: true, updatedAt: true,
-      archivedAt: true, statusBeforeArchive: true,
+      approvedAt: true, archivedAt: true, statusBeforeArchive: true,
       inviteDeliveryStatus: true, inviteSentAt: true, inviteFailedAt: true,
       activatedAt: true, lastLoginAt: true, lastLoginFailedAt: true, loginFailureCount: true,
     },
@@ -218,7 +218,16 @@ export async function findVolunteerByEmail(email: string) {
 
 export async function updateVolunteerStatus(id: string, status: string) {
   try {
-    return await prisma.volunteer.update({ where: { id }, data: { status } });
+    const volunteer = await prisma.volunteer.findUnique({ where: { id } });
+    if (!volunteer) return null;
+    return await prisma.volunteer.update({
+      where: { id },
+      data: {
+        status,
+        // Preserve the original active date through suspension/unsuspension.
+        ...(status === 'approved' && !volunteer.approvedAt ? { approvedAt: new Date() } : {}),
+      },
+    });
   } catch {
     return null;
   }
@@ -385,6 +394,8 @@ const DEFAULT_SETTINGS = {
   socialGroupLink: '',
   socialShareMessage: '',
   socialShareUrl: '',
+  // Days an approved volunteer must be active before their first stipend request.
+  stipendActivationDelayDays: 7,
   visionItems: [] as { icon: string; title: string; description: string }[],
 };
 
@@ -407,6 +418,7 @@ export async function getSettings() {
     socialGroupLink: map.socialGroupLink ?? DEFAULT_SETTINGS.socialGroupLink,
     socialShareMessage: map.socialShareMessage ?? DEFAULT_SETTINGS.socialShareMessage,
     socialShareUrl: map.socialShareUrl ?? DEFAULT_SETTINGS.socialShareUrl,
+    stipendActivationDelayDays: map.stipendActivationDelayDays ? Number(map.stipendActivationDelayDays) : DEFAULT_SETTINGS.stipendActivationDelayDays,
     visionItems: map.visionItems ? JSON.parse(map.visionItems) : DEFAULT_SETTINGS.visionItems,
   };
 }
@@ -602,9 +614,34 @@ export async function getAnalyticsSummary(days = 30) {
 }
 
 // ---- Weekly mobile-data stipend workflow ----
-const STIPEND_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+const STIPEND_REPEAT_COOLDOWN_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function getVolunteerStipendStatus(volunteerId: string) {
+  const [volunteer, settings] = await Promise.all([
+    prisma.volunteer.findUnique({ where: { id: volunteerId } }),
+    getSettings(),
+  ]);
+  const activationDelayDays = Math.max(0, Number(settings.stipendActivationDelayDays) || 0);
+
+  if (!volunteer) {
+    return { canRequest: false, reason: 'Volunteer account not found.', nextEligibleAt: null, latestRequest: null, activationDelayDays, repeatCooldownDays: STIPEND_REPEAT_COOLDOWN_DAYS };
+  }
+
+  // Existing approved volunteers may predate approvedAt; use registration date as a safe fallback.
+  const activeSince = volunteer.approvedAt || volunteer.createdAt;
+  const firstEligibleAt = new Date(activeSince.getTime() + activationDelayDays * DAY_MS);
+  if (firstEligibleAt > new Date()) {
+    return {
+      canRequest: false,
+      reason: `Mobile-data stipend requests become available after ${activationDelayDays} active day${activationDelayDays === 1 ? '' : 's'}.`,
+      nextEligibleAt: firstEligibleAt,
+      latestRequest: null,
+      activationDelayDays,
+      repeatCooldownDays: STIPEND_REPEAT_COOLDOWN_DAYS,
+    };
+  }
+
   const pending = await prisma.stipendRequest.findFirst({
     where: { volunteerId, status: 'pending' },
     orderBy: { requestedAt: 'desc' },
@@ -615,6 +652,8 @@ export async function getVolunteerStipendStatus(volunteerId: string) {
       reason: 'A stipend request is already awaiting review.',
       nextEligibleAt: null,
       latestRequest: pending,
+      activationDelayDays,
+      repeatCooldownDays: STIPEND_REPEAT_COOLDOWN_DAYS,
     };
   }
 
@@ -623,17 +662,19 @@ export async function getVolunteerStipendStatus(volunteerId: string) {
     orderBy: { requestedAt: 'desc' },
   });
   if (!latestIssued) {
-    return { canRequest: true, reason: null, nextEligibleAt: null, latestRequest: null };
+    return { canRequest: true, reason: null, nextEligibleAt: null, latestRequest: null, activationDelayDays, repeatCooldownDays: STIPEND_REPEAT_COOLDOWN_DAYS };
   }
 
   const issuedAt = latestIssued.paidAt || latestIssued.approvedAt || latestIssued.requestedAt;
-  const nextEligibleAt = new Date(issuedAt.getTime() + STIPEND_COOLDOWN_MS);
+  const nextEligibleAt = new Date(issuedAt.getTime() + STIPEND_REPEAT_COOLDOWN_DAYS * DAY_MS);
   const canRequest = nextEligibleAt <= new Date();
   return {
     canRequest,
-    reason: canRequest ? null : 'Mobile-data stipends are available once every 7 days after approval.',
+    reason: canRequest ? null : `Mobile-data stipends are available once every ${STIPEND_REPEAT_COOLDOWN_DAYS} days after approval.`,
     nextEligibleAt: canRequest ? null : nextEligibleAt,
     latestRequest: latestIssued,
+    activationDelayDays,
+    repeatCooldownDays: STIPEND_REPEAT_COOLDOWN_DAYS,
   };
 }
 

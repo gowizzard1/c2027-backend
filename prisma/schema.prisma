@@ -51,6 +51,8 @@ model Volunteer {
   lastLoginAt          DateTime?
   lastLoginFailedAt    DateTime?
   loginFailureCount    Int      @default(0)
+  // Recorded when admin first approves the volunteer; used for initial stipend eligibility.
+  approvedAt           DateTime?
   // Reversible admin archive: preserve the prior status so restore is accurate.
   archivedAt           DateTime?
   statusBeforeArchive  String?

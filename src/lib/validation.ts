@@ -166,6 +166,12 @@ export const settingsSchema = z.object({
   socialGroupLink: z.string().max(300).optional(),
   socialShareMessage: z.string().max(500).optional(),
   socialShareUrl: z.string().max(300).optional(),
+  stipendActivationDelayDays: z
+    .string()
+    .or(z.number())
+    .transform(val => Number(val))
+    .refine(val => Number.isInteger(val) && val >= 0 && val <= 90, 'Stipend activation delay must be a whole number from 0 to 90 days')
+    .optional(),
   visionItems: z.array(z.object({
     icon: z.string(),
     title: z.string(),
