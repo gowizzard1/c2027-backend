@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAdmin, createSession } from '../middleware/auth';
-import { authLimiter } from '../middleware/security';
+import { authLimiter, adminLimiter } from '../middleware/security';
 import {
   validate, loginSchema, newsSchema, productSchema,
   manifestoSchema, settingsSchema,
@@ -28,7 +28,7 @@ import {
   getAccountStipendRequests, getAssignmentMobilizerReports,
   getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
   getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
-  getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus,
+  getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -66,6 +66,9 @@ router.post('/login', authLimiter, validate(loginSchema), (req: Request, res: Re
     next(err);
   }
 });
+
+// Applies to every protected admin route below, in addition to the global API limit.
+router.use(adminLimiter);
 
 // --- Stats ---
 router.get('/stats', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
@@ -293,9 +296,17 @@ router.get('/polling-results', requireAdmin, async (req: Request, res: Response,
 router.patch('/polling-results/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { action, reviewNote } = req.body;
+    const note = typeof reviewNote === 'string' ? reviewNote.trim().slice(0, 2000) : undefined;
+    if (action === 'archive') {
+      const archivedBy = (req as any).user?.username || 'admin';
+      const report = await archivePollingResultReport(req.params.id, archivedBy, note);
+      if (!report) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling result report not found or already archived.');
+      logger.info({ pollingResultId: report.id, archivedBy }, 'Polling result archived by admin');
+      return res.json(report);
+    }
     const mapping: Record<string, 'under_review' | 'verified' | 'disputed'> = { review: 'under_review', verify: 'verified', dispute: 'disputed' };
-    if (!mapping[action]) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be review, verify, or dispute.');
-    const report = await updatePollingResultStatus(req.params.id, mapping[action], typeof reviewNote === 'string' ? reviewNote.trim().slice(0, 2000) : undefined);
+    if (!mapping[action]) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be review, verify, dispute, or archive.');
+    const report = await updatePollingResultStatus(req.params.id, mapping[action], note);
     if (!report) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling result report not found.');
     logger.info({ pollingResultId: report.id, action }, 'Polling result reviewed by admin');
     return res.json(report);

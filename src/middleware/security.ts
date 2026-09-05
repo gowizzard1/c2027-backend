@@ -44,6 +44,59 @@ export const paymentLimiter = rateLimit({
   message: { error: 'RATE_LIMITED', message: 'Too many payment attempts. Please wait before trying again.' },
 });
 
+/** Public signup creates database records and is intentionally more restrictive. */
+export const registrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'RATE_LIMITED', message: 'Too many volunteer registrations from this network. Please try again later.' },
+});
+
+/** Analytics writes are low-cost but must not become a database-write amplification vector. */
+export const analyticsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'RATE_LIMITED', message: 'Analytics request limit reached.' },
+});
+
+function volunteerAccountKey(req: Request) {
+  // This limiter is always placed after requireVolunteer; account ID is the stable
+  // authenticated identity and avoids shared-IP bypasses or IPv6 parsing concerns.
+  return `account:${(req as any).volunteer?.accountId || 'missing'}`;
+}
+
+/** Applies after requireVolunteer; bounds authenticated dashboard/report/stipend activity per account. */
+export const volunteerActionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: volunteerAccountKey,
+  message: { error: 'RATE_LIMITED', message: 'Too many account requests. Please wait before trying again.' },
+});
+
+/** File uploads are expensive and must be strictly bounded per authenticated account. */
+export const resultUploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: volunteerAccountKey,
+  message: { error: 'RATE_LIMITED', message: 'Too many result upload attempts. Please wait before trying again.' },
+});
+
+/** Administrative API is also rate-limited even after authentication. */
+export const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'RATE_LIMITED', message: 'Too many administrative requests. Please wait before trying again.' },
+});
+
 /**
  * Request ID middleware — attaches a unique ID for tracing.
  */

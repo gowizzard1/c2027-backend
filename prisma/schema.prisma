@@ -319,6 +319,9 @@ model PollingResultReport {
   rejectedVotes      Int      @default(0)
   notes              String?
   reviewNote         String?
+  archivedAt         DateTime?
+  archiveNote        String?
+  archivedBy         String?
   submittedAt        DateTime @default(now())
   reviewedAt         DateTime?
   attachments        PollingResultAttachment[]

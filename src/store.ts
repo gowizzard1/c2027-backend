@@ -1172,8 +1172,16 @@ export async function setElectionCandidateActive(id: string, active: boolean) {
 
 export async function getPollingResultForAssignment(assignmentId: string) {
   return prisma.pollingResultReport.findFirst({
-    where: { assignmentId, status: { not: 'superseded' } },
+    where: { assignmentId, status: { notIn: ['superseded', 'archived'] } },
     include: { attachments: true },
+    orderBy: { revisionNumber: 'desc' },
+  });
+}
+
+/** One unarchived result report per polling station at a time. */
+export async function getActivePollingResultForStation(pollingStationId: string) {
+  return prisma.pollingResultReport.findFirst({
+    where: { pollingStationId, status: { notIn: ['superseded', 'archived'] } },
     orderBy: { revisionNumber: 'desc' },
   });
 }
@@ -1187,13 +1195,21 @@ export async function createPollingResultReport(data: {
   notes?: string;
   attachment: { objectKey: string; mimeType: string; originalName: string };
 }) {
-  const existing = await getPollingResultForAssignment(data.assignmentId);
-  if (existing) return null;
+  const existingAssignmentResult = await getPollingResultForAssignment(data.assignmentId);
+  const existingStationResult = await getActivePollingResultForStation(data.pollingStationId);
+  if (existingAssignmentResult || existingStationResult) return null;
+  const previousRevision = await prisma.pollingResultReport.findFirst({
+    where: { assignmentId: data.assignmentId },
+    orderBy: { revisionNumber: 'desc' },
+    select: { revisionNumber: true },
+  });
+  const revisionNumber = (previousRevision?.revisionNumber || 0) + 1;
   return prisma.$transaction(async tx => {
     const report = await tx.pollingResultReport.create({
       data: {
         assignmentId: data.assignmentId,
         pollingStationId: data.pollingStationId,
+        revisionNumber,
         candidateVotesJson: data.candidateVotesJson,
         validVotes: data.validVotes,
         rejectedVotes: data.rejectedVotes,
@@ -1227,6 +1243,8 @@ export async function getPollingResultAttachment(reportId: string, attachmentId:
 
 export async function updatePollingResultStatus(id: string, status: 'under_review' | 'verified' | 'disputed', reviewNote?: string) {
   try {
+    const report = await prisma.pollingResultReport.findUnique({ where: { id } });
+    if (!report || report.status === 'archived') return null;
     return await prisma.pollingResultReport.update({
       where: { id },
       data: { status, reviewNote, reviewedAt: new Date() },
@@ -1298,4 +1316,22 @@ export async function getPublicVerifiedPollingResults() {
       verifiedAt: report.reviewedAt || report.submittedAt,
     })).sort((a, b) => a.ward.localeCompare(b.ward) || a.station.localeCompare(b.station)),
   };
+}
+
+export async function archivePollingResultReport(id: string, archivedBy: string, archiveNote?: string) {
+  try {
+    const report = await prisma.pollingResultReport.findUnique({ where: { id } });
+    if (!report || report.status === 'archived') return null;
+    return await prisma.pollingResultReport.update({
+      where: { id },
+      data: {
+        status: 'archived',
+        archivedAt: new Date(),
+        archivedBy,
+        archiveNote: archiveNote?.trim() || null,
+      },
+    });
+  } catch {
+    return null;
+  }
 }

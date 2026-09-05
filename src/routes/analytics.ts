@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { analyticsLimiter } from '../middleware/security';
 import { recordAnalyticsEvent } from '../store';
 import logger from '../lib/logger';
 
@@ -10,7 +11,7 @@ const DEVICE_TYPES = new Set(['mobile', 'tablet', 'desktop', 'unknown']);
  * Anonymous first-party pageview endpoint.
  * Intentionally stores no IP address, raw user agent, query parameters, or full referrer URL.
  */
-router.post('/pageview', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/pageview', analyticsLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const visitorId = typeof req.body?.visitorId === 'string' ? req.body.visitorId.trim() : '';
     const path = typeof req.body?.path === 'string' ? req.body.path.trim() : '';

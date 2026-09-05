@@ -15,7 +15,7 @@ import {
   getElectionCandidates, createPollingResultReport, getPollingResultForAssignment,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
-import { authLimiter } from '../middleware/security';
+import { authLimiter, registrationLimiter, volunteerActionLimiter, resultUploadLimiter } from '../middleware/security';
 import { createVolunteerSession, requireVolunteer } from '../middleware/auth';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
@@ -134,7 +134,7 @@ router.get('/election-candidates', async (_req: Request, res: Response, next: Ne
   }
 });
 
-router.post('/', validate(volunteerSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', registrationLimiter, validate(volunteerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       name, email, phone, idNumber, county, constituency, ward, role, experience,
@@ -296,7 +296,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response, next: Nex
 });
 
 /** Switch the selected role within the authenticated volunteer account. */
-router.post('/switch-role', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/switch-role', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { account } = await loadSessionContext(req);
     const assignmentId = typeof req.body?.assignmentId === 'string' ? req.body.assignmentId : '';
@@ -316,7 +316,7 @@ router.post('/switch-role', requireVolunteer, async (req: Request, res: Response
  * Private polling-station result submission. Requires an approved polling-agent assignment,
  * its approved active Turbo station, complete candidate counts, and a readable official form photo.
  */
-router.post('/polling-result', requireVolunteer, (req: Request, res: Response, next: NextFunction) => {
+router.post('/polling-result', requireVolunteer, resultUploadLimiter, (req: Request, res: Response, next: NextFunction) => {
   resultUpload.single('formPhoto')(req, res, err => {
     if (err) return res.status(400).json({ error: 'FORM_UPLOAD_INVALID', message: 'Upload a JPEG, PNG, or WebP result form image no larger than 5MB.' });
     next();
@@ -386,7 +386,7 @@ router.post('/polling-result', requireVolunteer, (req: Request, res: Response, n
 });
 
 /** Submit one aggregate weekly report for the selected approved mobilizer assignment. */
-router.post('/mobilizer/report', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/mobilizer/report', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { assignment } = await loadSessionContext(req);
     if (assignment.status !== 'approved' || assignment.role !== 'mobilizer') {
@@ -410,7 +410,7 @@ router.post('/mobilizer/report', requireVolunteer, async (req: Request, res: Res
 });
 
 /** Request a person-level stipend; multiple roles never create multiple eligibility timelines. */
-router.post('/stipend/request', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/stipend/request', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { account } = await loadSessionContext(req);
     const eligibility = await getAccountStipendStatus(account.id);
@@ -423,7 +423,7 @@ router.post('/stipend/request', requireVolunteer, async (req: Request, res: Resp
   }
 });
 
-router.get('/me', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { account, assignment } = await loadSessionContext(req);
     return res.json(await toolkitPayload(account, assignment));
