@@ -5,7 +5,7 @@
  * public URL is returned. When they are not configured, callers fall back to
  * local disk (see routes/upload.ts) — acceptable for local dev only.
  */
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import logger from '../lib/logger';
 
 let client: S3Client | null = null;
@@ -20,6 +20,15 @@ export function isObjectStorageConfigured(): boolean {
     process.env.S3_ACCESS_KEY_ID &&
     process.env.S3_SECRET_ACCESS_KEY &&
     process.env.S3_PUBLIC_URL
+  );
+}
+
+/** Private storage only needs authenticated bucket access; no public bucket URL. */
+export function isPrivateObjectStorageConfigured(): boolean {
+  return !!(
+    process.env.S3_BUCKET &&
+    process.env.S3_ACCESS_KEY_ID &&
+    process.env.S3_SECRET_ACCESS_KEY
   );
 }
 
@@ -68,4 +77,33 @@ export async function putObject(key: string, body: Buffer, contentType: string):
   const url = `${base}/${key}`;
   logger.info({ key, bucket: process.env.S3_BUCKET }, 'Uploaded object to storage');
   return url;
+}
+
+/**
+ * Store sensitive election evidence without returning a public URL.
+ * The object key is later fetched only through a protected admin endpoint.
+ */
+export async function putPrivateObject(key: string, body: Buffer, contentType: string): Promise<string> {
+  if (!isPrivateObjectStorageConfigured()) {
+    throw new Error('Private object storage is not configured');
+  }
+  await getClient().send(new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET!,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: 'private, no-store',
+  }));
+  logger.info({ key, bucket: process.env.S3_BUCKET }, 'Stored private object');
+  return key;
+}
+
+/** Retrieve a private object body for an authenticated admin-only download/preview route. */
+export async function getPrivateObject(key: string) {
+  if (!isPrivateObjectStorageConfigured()) {
+    throw new Error('Private object storage is not configured');
+  }
+  const result = await getClient().send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+  if (!result.Body) throw new Error('Private object not found');
+  return { body: result.Body, contentType: result.ContentType || 'application/octet-stream' };
 }

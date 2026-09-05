@@ -27,10 +27,13 @@ import {
   resetAccountAccess, recordAccountInviteResult,
   getAccountStipendRequests, getAssignmentMobilizerReports,
   getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
+  getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
+  getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
 import { sendVolunteerInvite } from '../services/email';
+import { getPrivateObject } from '../services/storage';
 import { getVolunteerById } from '../store';
 import { env } from '../lib/env';
 import { isTurboWard, TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS } from '../lib/polling';
@@ -241,6 +244,77 @@ router.post('/polling-stations/:id/review', requireAdmin, async (req: Request, r
     const station = await updatePollingStationApproval(req.params.id, action === 'approve' ? 'approved' : 'rejected');
     if (!station) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling station not found.');
     return res.json(station);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Election candidate registry and private polling result review ---
+router.get('/election-candidates', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getElectionCandidates(req.query.includeInactive === 'true'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/election-candidates', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const party = typeof req.body?.party === 'string' ? req.body.party.trim() : '';
+    if (!name || name.length > 150 || party.length > 150) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
+    return res.status(201).json(await addElectionCandidate({ name, party: party || undefined }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/election-candidates/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (typeof req.body?.active !== 'boolean') throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'active must be true or false.');
+    const candidate = await setElectionCandidateActive(req.params.id, req.body.active);
+    if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate not found.');
+    return res.json(candidate);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/polling-results', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    return res.json(await getPollingResultReports({ page, limit }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/polling-results/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { action, reviewNote } = req.body;
+    const mapping: Record<string, 'under_review' | 'verified' | 'disputed'> = { review: 'under_review', verify: 'verified', dispute: 'disputed' };
+    if (!mapping[action]) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be review, verify, or dispute.');
+    const report = await updatePollingResultStatus(req.params.id, mapping[action], typeof reviewNote === 'string' ? reviewNote.trim().slice(0, 2000) : undefined);
+    if (!report) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling result report not found.');
+    logger.info({ pollingResultId: report.id, action }, 'Polling result reviewed by admin');
+    return res.json(report);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/polling-results/:reportId/attachments/:attachmentId', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const attachment = await getPollingResultAttachment(req.params.reportId, req.params.attachmentId);
+    if (!attachment) throw new AppError(404, ErrorCode.NOT_FOUND, 'Result form attachment not found.');
+    const object = await getPrivateObject(attachment.objectKey);
+    const body: any = object.body;
+    const bytes = await body.transformToByteArray();
+    res.setHeader('Content-Type', object.contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${attachment.originalName.replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.send(Buffer.from(bytes));
   } catch (err) {
     next(err);
   }

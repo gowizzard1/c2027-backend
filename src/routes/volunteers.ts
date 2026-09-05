@@ -1,5 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import path from 'path';
+import crypto from 'crypto';
 import { sendVolunteerConfirmation } from '../services/notifications';
 import {
   registerVolunteerRole, getVolunteerAccountByAccessToken, getVolunteerAccountByEmail,
@@ -9,6 +12,7 @@ import {
   getAccountMobilizerDashboard, createAssignmentMobilizerReport,
   getActiveTurboPollingStation, getPollingStations,
   proposePollingStation,
+  getElectionCandidates, createPollingResultReport, getPollingResultForAssignment,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -16,8 +20,15 @@ import { createVolunteerSession, requireVolunteer } from '../middleware/auth';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
 import { TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS, isTurboWard } from '../lib/polling';
+import { isPrivateObjectStorageConfigured, putPrivateObject } from '../services/storage';
 
 const router = Router();
+
+const resultUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
+});
 
 const roleLabels: Record<string, string> = {
   polling_agent: 'Polling Agent',
@@ -54,6 +65,7 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
 
   let social: { groupLink: string; shareMessage: string; shareUrl: string } | null = null;
   let mobilizer: any = null;
+  let pollingResult: any = null;
   const { getSettings } = await import('../store');
   const settings = await getSettings();
   if (approvedSocial) {
@@ -65,6 +77,9 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
   }
   if (selected.role === 'mobilizer' && isApproved) {
     mobilizer = await getAccountMobilizerDashboard(selected.id);
+  }
+  if (selected.role === 'polling_agent' && isApproved) {
+    pollingResult = await getPollingResultForAssignment(selected.id);
   }
 
   return {
@@ -92,6 +107,7 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
     social,
     stipend,
     mobilizer,
+    pollingResult,
   };
 }
 
@@ -104,6 +120,15 @@ router.get('/polling-config', async (_req: Request, res: Response) => {
 router.get('/polling-stations', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     return res.json(await getPollingStations());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Public active candidate registry used by the private polling-agent report form. */
+router.get('/election-candidates', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getElectionCandidates());
   } catch (err) {
     next(err);
   }
@@ -281,6 +306,80 @@ router.post('/switch-role', requireVolunteer, async (req: Request, res: Response
     }
     const token = createVolunteerSession(account.id, assignment.id, assignment.role, account.sessionVersion);
     return res.json({ success: true, token, ...(await toolkitPayload(account, assignment)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/volunteers/polling-result (multipart/form-data)
+ * Private polling-station result submission. Requires an approved polling-agent assignment,
+ * its approved active Turbo station, complete candidate counts, and a readable official form photo.
+ */
+router.post('/polling-result', requireVolunteer, (req: Request, res: Response, next: NextFunction) => {
+  resultUpload.single('formPhoto')(req, res, err => {
+    if (err) return res.status(400).json({ error: 'FORM_UPLOAD_INVALID', message: 'Upload a JPEG, PNG, or WebP result form image no larger than 5MB.' });
+    next();
+  });
+}, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { assignment } = await loadSessionContext(req);
+    if (assignment.role !== 'polling_agent' || assignment.status !== 'approved' || !assignment.pollingStationId) {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Only approved polling agents with an assigned station can submit results.');
+    }
+    const station = await getActiveTurboPollingStation(assignment.pollingStationId);
+    if (!station) throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Your assigned polling station is not active or approved.');
+    if (!req.file) return res.status(400).json({ error: 'RESULT_FORM_REQUIRED', message: 'A clear photo of the official counted-results form is required.' });
+    if (!isPrivateObjectStorageConfigured()) {
+      return res.status(503).json({ error: 'PRIVATE_STORAGE_REQUIRED', message: 'Private result-form storage is not configured. Contact the campaign administrator.' });
+    }
+    if (await getPollingResultForAssignment(assignment.id)) {
+      return res.status(409).json({ error: 'RESULT_ALREADY_SUBMITTED', message: 'A result report has already been submitted for this polling assignment.' });
+    }
+
+    const activeCandidates = await getElectionCandidates();
+    if (activeCandidates.length === 0) return res.status(503).json({ error: 'CANDIDATES_NOT_CONFIGURED', message: 'The candidate list has not been configured by the campaign administrator.' });
+    const rawVotes = typeof req.body?.candidateVotes === 'string' ? req.body.candidateVotes : '';
+    let submittedVotes: { candidateId: string; votes: number }[];
+    try { submittedVotes = JSON.parse(rawVotes); } catch { throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate vote entries are invalid.'); }
+    if (!Array.isArray(submittedVotes) || submittedVotes.length !== activeCandidates.length) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Enter a vote count for every configured candidate.');
+    }
+    const voteByCandidate = new Map<string, number>();
+    for (const entry of submittedVotes) {
+      if (!entry || typeof entry.candidateId !== 'string' || !Number.isInteger(entry.votes) || entry.votes < 0 || voteByCandidate.has(entry.candidateId)) {
+        throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Each candidate must have one non-negative whole-number vote count.');
+      }
+      voteByCandidate.set(entry.candidateId, entry.votes);
+    }
+    if (activeCandidates.some(candidate => !voteByCandidate.has(candidate.id))) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate list no longer matches this report. Refresh and try again.');
+    }
+    const validVotes = Number(req.body?.validVotes);
+    const rejectedVotes = Number(req.body?.rejectedVotes || 0);
+    const totalCandidateVotes = [...voteByCandidate.values()].reduce((sum, value) => sum + value, 0);
+    if (!Number.isInteger(validVotes) || validVotes < 0 || !Number.isInteger(rejectedVotes) || rejectedVotes < 0 || validVotes !== totalCandidateVotes) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Valid votes must equal the total of all candidate vote counts.');
+    }
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
+    if (notes.length > 2000) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Notes must be 2,000 characters or fewer.');
+
+    const extension = path.extname(req.file.originalname).toLowerCase() || (req.file.mimetype === 'image/png' ? '.png' : '.jpg');
+    const objectKey = `private/polling-results/${assignment.id}/${crypto.randomUUID()}${extension}`;
+    await putPrivateObject(objectKey, req.file.buffer, req.file.mimetype);
+    const candidateVotesJson = JSON.stringify(activeCandidates.map(candidate => ({ candidateId: candidate.id, candidateName: candidate.name, party: candidate.party, votes: voteByCandidate.get(candidate.id) })));
+    const report = await createPollingResultReport({
+      assignmentId: assignment.id,
+      pollingStationId: station.id,
+      candidateVotesJson,
+      validVotes,
+      rejectedVotes,
+      notes: notes || undefined,
+      attachment: { objectKey, mimeType: req.file.mimetype, originalName: req.file.originalname },
+    });
+    if (!report) return res.status(409).json({ error: 'RESULT_ALREADY_SUBMITTED', message: 'A result report has already been submitted for this polling assignment.' });
+    logger.info({ assignmentId: assignment.id, reportId: report.id, pollingStationId: station.id }, 'Private polling result submitted');
+    return res.status(201).json({ success: true, reportId: report.id, status: report.status });
   } catch (err) {
     next(err);
   }
