@@ -8,6 +8,7 @@ import {
   getVolunteerById, setVolunteerPassword, getSettings,
   recordVolunteerLoginSuccess, recordVolunteerLoginFailure,
   getVolunteerStipendStatus, createStipendRequest,
+  getMobilizerDashboard, createMobilizerReport,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -53,9 +54,16 @@ async function toolkitPayload(volunteer: any) {
         repeatCooldownDays: 7,
       };
 
+  const mobilizer = volunteer.role === 'mobilizer' && volunteer.status === 'approved'
+    ? await getMobilizerDashboard(volunteer.id)
+    : null;
+
   return {
     name: volunteer.name,
     email: volunteer.email,
+    county: volunteer.county,
+    constituency: volunteer.constituency,
+    ward: volunteer.ward,
     role: volunteer.role,
     status: volunteer.status,
     isSocialMedia: volunteer.role === 'social_media',
@@ -63,6 +71,7 @@ async function toolkitPayload(volunteer: any) {
     approvedSocial,
     social,
     stipend,
+    mobilizer,
   };
 }
 
@@ -179,6 +188,46 @@ router.post('/login', authLimiter, async (req: Request, res: Response, next: Nex
     const token = createVolunteerSession(volunteer.id, volunteer.role);
     logger.info({ volunteerId: volunteer.id }, 'Volunteer logged in');
     return res.json({ success: true, token, ...(await toolkitPayload(volunteer)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/volunteers/mobilizer/report (requires approved mobilizer session)
+ * Submit one aggregate weekly field report. No named voter/contact data is accepted.
+ */
+router.post('/mobilizer/report', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = (req as any).volunteer as { id: string };
+    const volunteer = await getVolunteerById(id);
+    if (!volunteer || volunteer.status !== 'approved' || volunteer.role !== 'mobilizer') {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Weekly reports are available to approved mobilizers only.');
+    }
+
+    const peopleReached = Number(req.body?.peopleReached || 0);
+    const meetingsHeld = Number(req.body?.meetingsHeld || 0);
+    const newVolunteers = Number(req.body?.newVolunteers || 0);
+    const keyIssues = typeof req.body?.keyIssues === 'string' ? req.body.keyIssues.trim() : '';
+    const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
+    const counts = [peopleReached, meetingsHeld, newVolunteers];
+    if (counts.some(value => !Number.isInteger(value) || value < 0 || value > 100000) || keyIssues.length > 1000 || notes.length > 2000) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Please provide valid aggregate activity counts and concise notes.');
+    }
+
+    const report = await createMobilizerReport(volunteer.id, {
+      peopleReached,
+      meetingsHeld,
+      newVolunteers,
+      keyIssues: keyIssues || undefined,
+      notes: notes || undefined,
+    });
+    if (!report) {
+      return res.status(409).json({ error: 'REPORT_EXISTS', message: 'You have already submitted a report for this week.' });
+    }
+
+    logger.info({ volunteerId: volunteer.id, reportId: report.id }, 'Mobilizer weekly report submitted');
+    return res.status(201).json({ success: true, report, mobilizer: await getMobilizerDashboard(volunteer.id) });
   } catch (err) {
     next(err);
   }

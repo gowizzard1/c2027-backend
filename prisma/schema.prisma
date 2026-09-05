@@ -183,3 +183,24 @@ model StipendRequest {
   @@index([volunteerId, requestedAt])
   @@index([status, requestedAt])
 }
+
+// Aggregate mobilizer activity report. Intentionally excludes named voter/contact lists and preference data.
+model MobilizerReport {
+  id            String   @id @default(cuid())
+  volunteerId   String
+  periodStart   DateTime // UTC Monday marking the reporting week
+  peopleReached Int      @default(0)
+  meetingsHeld  Int      @default(0)
+  newVolunteers Int      @default(0)
+  keyIssues     String?
+  notes         String?
+  status        String   @default("submitted") // submitted | reviewed | actioned
+  adminNote     String?
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([volunteerId, periodStart])
+  @@index([status, createdAt])
+  @@index([periodStart])
+}

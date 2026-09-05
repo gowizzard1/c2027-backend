@@ -166,6 +166,7 @@ export const settingsSchema = z.object({
   socialGroupLink: z.string().max(300).optional(),
   socialShareMessage: z.string().max(500).optional(),
   socialShareUrl: z.string().max(300).optional(),
+  mobilizerGroupLink: z.string().max(300).optional(),
   stipendActivationDelayDays: z
     .string()
     .or(z.number())

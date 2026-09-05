@@ -21,6 +21,7 @@ import {
   getPledges, updatePledgeStatus, deletePledge,
   getAnalyticsSummary,
   getStipendRequests, approveStipendRequest, rejectStipendRequest, markStipendRequestPaid,
+  getMobilizerReports, updateMobilizerReportStatus,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -235,6 +236,32 @@ router.patch('/stipend-requests/:id', requireAdmin, async (req: Request, res: Re
     }
     logger.info({ stipendRequestId: request.id, action }, 'Stipend request updated by admin');
     return res.json(request);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Mobilizer weekly activity reports ---
+router.get('/mobilizer-reports', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    return res.json(await getMobilizerReports({ page, limit }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/mobilizer-reports/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { action, adminNote } = req.body;
+    if (action !== 'review' && action !== 'action') {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be review or action');
+    }
+    const report = await updateMobilizerReportStatus(req.params.id, action === 'review' ? 'reviewed' : 'actioned', adminNote);
+    if (!report) throw new AppError(404, ErrorCode.NOT_FOUND, 'Mobilizer report not found');
+    logger.info({ mobilizerReportId: report.id, action }, 'Mobilizer report updated by admin');
+    return res.json(report);
   } catch (err) {
     next(err);
   }

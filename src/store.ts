@@ -394,6 +394,7 @@ const DEFAULT_SETTINGS = {
   socialGroupLink: '',
   socialShareMessage: '',
   socialShareUrl: '',
+  mobilizerGroupLink: '',
   // Days an approved volunteer must be active before their first stipend request.
   stipendActivationDelayDays: 7,
   visionItems: [] as { icon: string; title: string; description: string }[],
@@ -418,6 +419,7 @@ export async function getSettings() {
     socialGroupLink: map.socialGroupLink ?? DEFAULT_SETTINGS.socialGroupLink,
     socialShareMessage: map.socialShareMessage ?? DEFAULT_SETTINGS.socialShareMessage,
     socialShareUrl: map.socialShareUrl ?? DEFAULT_SETTINGS.socialShareUrl,
+    mobilizerGroupLink: map.mobilizerGroupLink ?? DEFAULT_SETTINGS.mobilizerGroupLink,
     stipendActivationDelayDays: map.stipendActivationDelayDays ? Number(map.stipendActivationDelayDays) : DEFAULT_SETTINGS.stipendActivationDelayDays,
     visionItems: map.visionItems ? JSON.parse(map.visionItems) : DEFAULT_SETTINGS.visionItems,
   };
@@ -721,4 +723,73 @@ export function rejectStipendRequest(id: string, adminNote?: string) {
 
 export function markStipendRequestPaid(id: string, paymentRef?: string) {
   return updateStipendRequestStatus(id, 'approved', { status: 'paid', paidAt: new Date(), paymentRef });
+}
+
+// ---- Mobilizer weekly reports (aggregate activity only) ----
+function currentWeekStartUtc(date = new Date()) {
+  const start = new Date(date);
+  start.setUTCHours(0, 0, 0, 0);
+  // JavaScript Sunday = 0; convert to a Monday-start reporting week.
+  const day = start.getUTCDay();
+  const daysSinceMonday = (day + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - daysSinceMonday);
+  return start;
+}
+
+export async function getMobilizerDashboard(volunteerId: string) {
+  const periodStart = currentWeekStartUtc();
+  const [currentReport, recentReports, settings] = await Promise.all([
+    prisma.mobilizerReport.findUnique({ where: { volunteerId_periodStart: { volunteerId, periodStart } } }),
+    prisma.mobilizerReport.findMany({ where: { volunteerId }, orderBy: { periodStart: 'desc' }, take: 4 }),
+    getSettings(),
+  ]);
+  return {
+    groupLink: settings.mobilizerGroupLink || settings.whatsappLink || '',
+    periodStart,
+    currentReport,
+    recentReports,
+  };
+}
+
+export async function createMobilizerReport(volunteerId: string, data: {
+  peopleReached: number;
+  meetingsHeld: number;
+  newVolunteers: number;
+  keyIssues?: string;
+  notes?: string;
+}) {
+  const periodStart = currentWeekStartUtc();
+  try {
+    return await prisma.mobilizerReport.create({ data: { volunteerId, periodStart, ...data } });
+  } catch {
+    // Unique weekly-report constraint means one submission per mobilizer per week.
+    return null;
+  }
+}
+
+export async function getMobilizerReports(options: PaginationOptions = {}) {
+  const { page = 1, limit = 50 } = options;
+  const reports = await prisma.mobilizerReport.findMany({
+    orderBy: { createdAt: 'desc' },
+    skip: (page - 1) * limit,
+    take: limit,
+  });
+  const volunteerIds = [...new Set(reports.map(report => report.volunteerId))];
+  const volunteers = await prisma.volunteer.findMany({
+    where: { id: { in: volunteerIds } },
+    select: { id: true, name: true, email: true, phone: true, ward: true, constituency: true, status: true },
+  });
+  const byId = new Map(volunteers.map(volunteer => [volunteer.id, volunteer]));
+  return reports.map(report => ({ ...report, volunteer: byId.get(report.volunteerId) || null }));
+}
+
+export async function updateMobilizerReportStatus(id: string, status: 'reviewed' | 'actioned', adminNote?: string) {
+  try {
+    return await prisma.mobilizerReport.update({
+      where: { id },
+      data: { status, adminNote, reviewedAt: new Date() },
+    });
+  } catch {
+    return null;
+  }
 }
