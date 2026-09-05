@@ -165,3 +165,19 @@ model AnalyticsEvent {
   @@index([path, createdAt])
   @@index([visitorId, createdAt])
 }
+
+// Mobile-data stipend requests. Approval/payment is manual today; fields support future M-Pesa automation.
+model StipendRequest {
+  id          String   @id @default(cuid())
+  volunteerId String
+  status      String   @default("pending") // pending | approved | paid | rejected
+  requestedAt DateTime @default(now())
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  rejectedAt  DateTime?
+  adminNote   String?
+  paymentRef  String?  // Reserved for future M-Pesa transaction reference
+
+  @@index([volunteerId, requestedAt])
+  @@index([status, requestedAt])
+}

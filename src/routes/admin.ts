@@ -20,6 +20,7 @@ import {
   getPaymentMode, setPaymentMode,
   getPledges, updatePledgeStatus, deletePledge,
   getAnalyticsSummary,
+  getStipendRequests, approveStipendRequest, rejectStipendRequest, markStipendRequestPaid,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -203,6 +204,37 @@ router.post('/volunteers/:id/restore', requireAdmin, async (req: Request, res: R
     if (!volunteer) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived volunteer not found');
     logger.info({ volunteerId: volunteer.id, restoredStatus: volunteer.status }, 'Volunteer restored by admin');
     return res.json(volunteer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Mobile-data stipend requests (manual payment until M-Pesa automation is enabled) ---
+router.get('/stipend-requests', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    return res.json(await getStipendRequests({ page, limit }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/stipend-requests/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { action, adminNote, paymentRef } = req.body;
+    let request = null;
+    if (action === 'approve') request = await approveStipendRequest(req.params.id, adminNote);
+    if (action === 'reject') request = await rejectStipendRequest(req.params.id, adminNote);
+    if (action === 'mark_paid') request = await markStipendRequestPaid(req.params.id, paymentRef);
+    if (!['approve', 'reject', 'mark_paid'].includes(action)) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be approve, reject, or mark_paid');
+    }
+    if (!request) {
+      throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'This request is no longer in a state that allows this action');
+    }
+    logger.info({ stipendRequestId: request.id, action }, 'Stipend request updated by admin');
+    return res.json(request);
   } catch (err) {
     next(err);
   }

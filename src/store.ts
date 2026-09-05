@@ -600,3 +600,84 @@ export async function getAnalyticsSummary(days = 30) {
     devices: countBy(events, event => event.deviceType).slice(0, 4),
   };
 }
+
+// ---- Weekly mobile-data stipend workflow ----
+const STIPEND_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function getVolunteerStipendStatus(volunteerId: string) {
+  const pending = await prisma.stipendRequest.findFirst({
+    where: { volunteerId, status: 'pending' },
+    orderBy: { requestedAt: 'desc' },
+  });
+  if (pending) {
+    return {
+      canRequest: false,
+      reason: 'A stipend request is already awaiting review.',
+      nextEligibleAt: null,
+      latestRequest: pending,
+    };
+  }
+
+  const latestIssued = await prisma.stipendRequest.findFirst({
+    where: { volunteerId, status: { in: ['approved', 'paid'] } },
+    orderBy: { requestedAt: 'desc' },
+  });
+  if (!latestIssued) {
+    return { canRequest: true, reason: null, nextEligibleAt: null, latestRequest: null };
+  }
+
+  const issuedAt = latestIssued.paidAt || latestIssued.approvedAt || latestIssued.requestedAt;
+  const nextEligibleAt = new Date(issuedAt.getTime() + STIPEND_COOLDOWN_MS);
+  const canRequest = nextEligibleAt <= new Date();
+  return {
+    canRequest,
+    reason: canRequest ? null : 'Mobile-data stipends are available once every 7 days after approval.',
+    nextEligibleAt: canRequest ? null : nextEligibleAt,
+    latestRequest: latestIssued,
+  };
+}
+
+export async function createStipendRequest(volunteerId: string) {
+  return prisma.stipendRequest.create({ data: { volunteerId } });
+}
+
+export async function getStipendRequests(options: PaginationOptions = {}) {
+  const { page = 1, limit = 50 } = options;
+  const requests = await prisma.stipendRequest.findMany({
+    orderBy: { requestedAt: 'desc' },
+    skip: (page - 1) * limit,
+    take: limit,
+  });
+  const volunteerIds = [...new Set(requests.map(request => request.volunteerId))];
+  const volunteers = await prisma.volunteer.findMany({
+    where: { id: { in: volunteerIds } },
+    select: { id: true, name: true, email: true, phone: true, role: true, status: true },
+  });
+  const byId = new Map(volunteers.map(volunteer => [volunteer.id, volunteer]));
+  return requests.map(request => ({ ...request, volunteer: byId.get(request.volunteerId) || null }));
+}
+
+async function updateStipendRequestStatus(id: string, fromStatus: string, data: {
+  status: string;
+  approvedAt?: Date;
+  paidAt?: Date;
+  rejectedAt?: Date;
+  adminNote?: string;
+  paymentRef?: string;
+}) {
+  const result = await prisma.stipendRequest.updateMany({ where: { id, status: fromStatus }, data });
+  if (result.count !== 1) return null;
+  return prisma.stipendRequest.findUnique({ where: { id } });
+}
+
+export function approveStipendRequest(id: string, adminNote?: string) {
+  return updateStipendRequestStatus(id, 'pending', { status: 'approved', approvedAt: new Date(), adminNote });
+}
+
+export function rejectStipendRequest(id: string, adminNote?: string) {
+  return updateStipendRequestStatus(id, 'pending', { status: 'rejected', rejectedAt: new Date(), adminNote });
+}
+
+export function markStipendRequestPaid(id: string, paymentRef?: string) {
+  return updateStipendRequestStatus(id, 'approved', { status: 'paid', paidAt: new Date(), paymentRef });
+}

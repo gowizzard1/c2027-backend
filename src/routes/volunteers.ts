@@ -7,6 +7,7 @@ import {
   addVolunteer, findVolunteerByAccessToken, findVolunteerByEmail,
   getVolunteerById, setVolunteerPassword, getSettings,
   recordVolunteerLoginSuccess, recordVolunteerLoginFailure,
+  getVolunteerStipendStatus, createStipendRequest,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -40,6 +41,15 @@ async function toolkitPayload(volunteer: any) {
       shareUrl: settings.socialShareUrl || '',
     };
   }
+  const stipend = volunteer.status === 'approved'
+    ? await getVolunteerStipendStatus(volunteer.id)
+    : {
+        canRequest: false,
+        reason: 'Mobile-data stipend requests are available after volunteer approval.',
+        nextEligibleAt: null,
+        latestRequest: null,
+      };
+
   return {
     name: volunteer.name,
     email: volunteer.email,
@@ -49,6 +59,7 @@ async function toolkitPayload(volunteer: any) {
     isApproved: volunteer.status === 'approved',
     approvedSocial,
     social,
+    stipend,
   };
 }
 
@@ -165,6 +176,36 @@ router.post('/login', authLimiter, async (req: Request, res: Response, next: Nex
     const token = createVolunteerSession(volunteer.id, volunteer.role);
     logger.info({ volunteerId: volunteer.id }, 'Volunteer logged in');
     return res.json({ success: true, token, ...(await toolkitPayload(volunteer)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/volunteers/stipend/request (requires volunteer session)
+ * Creates a manually-reviewed mobile-data stipend request. Enforces approval,
+ * one outstanding request, and a seven-day cooldown after approved/paid requests.
+ */
+router.post('/stipend/request', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = (req as any).volunteer as { id: string };
+    const volunteer = await getVolunteerById(id);
+    if (!volunteer || volunteer.status !== 'approved') {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Stipend requests are available to approved volunteers only.');
+    }
+
+    const eligibility = await getVolunteerStipendStatus(volunteer.id);
+    if (!eligibility.canRequest) {
+      return res.status(429).json({
+        error: 'STIPEND_NOT_ELIGIBLE',
+        message: eligibility.reason,
+        nextEligibleAt: eligibility.nextEligibleAt,
+      });
+    }
+
+    const request = await createStipendRequest(volunteer.id);
+    logger.info({ volunteerId: volunteer.id, stipendRequestId: request.id }, 'Mobile-data stipend requested');
+    return res.status(201).json({ success: true, request, stipend: await getVolunteerStipendStatus(volunteer.id) });
   } catch (err) {
     next(err);
   }
