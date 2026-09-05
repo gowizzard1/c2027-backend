@@ -1235,3 +1235,67 @@ export async function updatePollingResultStatus(id: string, status: 'under_revie
     return null;
   }
 }
+
+// ---- Public campaign-verified polling results ----
+// Never exposes agent identity, private evidence, internal notes, or unverified/disputed submissions.
+export async function getPublicVerifiedPollingResults() {
+  const verifiedReports = await prisma.pollingResultReport.findMany({
+    where: { status: 'verified' },
+    orderBy: [{ reviewedAt: 'desc' }, { submittedAt: 'desc' }],
+    select: {
+      id: true,
+      pollingStationId: true,
+      candidateVotesJson: true,
+      validVotes: true,
+      rejectedVotes: true,
+      submittedAt: true,
+      reviewedAt: true,
+      pollingStation: { select: { name: true, ward: true } },
+    },
+  });
+
+  // Only the newest verified report for each station contributes to public totals.
+  const byStation = new Map<string, typeof verifiedReports[number]>();
+  for (const report of verifiedReports) {
+    if (!byStation.has(report.pollingStationId)) byStation.set(report.pollingStationId, report);
+  }
+  const reports = [...byStation.values()];
+
+  const candidates = new Map<string, { id: string; name: string; party: string | null; votes: number }>();
+  let totalValidVotes = 0;
+  let totalRejectedVotes = 0;
+  let lastUpdated: Date | null = null;
+
+  for (const report of reports) {
+    totalValidVotes += report.validVotes;
+    totalRejectedVotes += report.rejectedVotes;
+    const updated = report.reviewedAt || report.submittedAt;
+    if (!lastUpdated || updated > lastUpdated) lastUpdated = updated;
+    try {
+      const votes = JSON.parse(report.candidateVotesJson) as { candidateId: string; candidateName: string; party?: string | null; votes: number }[];
+      for (const vote of votes) {
+        const current = candidates.get(vote.candidateId) || { id: vote.candidateId, name: vote.candidateName, party: vote.party || null, votes: 0 };
+        current.votes += Number(vote.votes) || 0;
+        candidates.set(vote.candidateId, current);
+      }
+    } catch {
+      // A malformed legacy snapshot is excluded from candidate totals but never breaks public results.
+      logger.warn({ reportId: report.id }, 'Could not parse verified polling result candidate snapshot');
+    }
+  }
+
+  return {
+    verifiedStations: reports.length,
+    totalValidVotes,
+    totalRejectedVotes,
+    lastUpdated,
+    candidates: [...candidates.values()].sort((a, b) => b.votes - a.votes),
+    stations: reports.map(report => ({
+      station: report.pollingStation.name,
+      ward: report.pollingStation.ward,
+      validVotes: report.validVotes,
+      rejectedVotes: report.rejectedVotes,
+      verifiedAt: report.reviewedAt || report.submittedAt,
+    })).sort((a, b) => a.ward.localeCompare(b.ward) || a.station.localeCompare(b.station)),
+  };
+}

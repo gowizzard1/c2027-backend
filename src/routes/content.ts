@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode } from '../store';
+import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults } from '../store';
 
 const router = Router();
 
@@ -49,6 +49,15 @@ router.get('/biography', async (_req: Request, res: Response, next: NextFunction
 router.get('/payment-mode', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     return res.json({ mode: await getPaymentMode() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Public campaign-verified internal result summaries. Not an official electoral declaration. */
+router.get('/verified-results', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getPublicVerifiedPollingResults());
   } catch (err) {
     next(err);
   }
