@@ -8,13 +8,14 @@ import {
   getAccountStipendStatus, createAccountStipendRequest,
   getAccountMobilizerDashboard, createAssignmentMobilizerReport,
   getActiveTurboPollingStation, getPollingStations,
+  proposePollingStation,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
 import { createVolunteerSession, requireVolunteer } from '../middleware/auth';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
-import { TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS } from '../lib/polling';
+import { TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS, isTurboWard } from '../lib/polling';
 
 const router = Router();
 
@@ -110,7 +111,10 @@ router.get('/polling-stations', async (_req: Request, res: Response, next: NextF
 
 router.post('/', validate(volunteerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, email, phone, idNumber, county, constituency, ward, role, experience, pollingStationId } = req.body;
+    const {
+      name, email, phone, idNumber, county, constituency, ward, role, experience,
+      pollingStationId, proposedPollingStationName, proposedPollingStationWard,
+    } = req.body;
     let assignedCounty = county;
     let assignedConstituency = constituency;
     let assignedWard = ward;
@@ -124,14 +128,37 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
         });
       }
       stationId = typeof pollingStationId === 'string' ? pollingStationId : '';
-      const station = stationId ? await getActiveTurboPollingStation(stationId) : null;
+      let station = stationId ? await getActiveTurboPollingStation(stationId) : null;
+
+      if (!station && proposedPollingStationName && proposedPollingStationWard) {
+        if (!isTurboWard(proposedPollingStationWard)) {
+          return res.status(400).json({
+            error: 'POLLING_STATION_WARD_INVALID',
+            message: `Choose one of the official Turbo wards: ${TURBO_WARDS.join(', ')}.`,
+          });
+        }
+        const proposal = await proposePollingStation({
+          name: proposedPollingStationName,
+          ward: proposedPollingStationWard,
+          proposedByEmail: email,
+        });
+        if (proposal.station.approvalStatus === 'rejected') {
+          return res.status(400).json({
+            error: 'POLLING_STATION_REJECTED',
+            message: 'This proposed polling station was previously rejected. Please contact the campaign team.',
+          });
+        }
+        station = proposal.station;
+        stationId = station.id;
+      }
+
       if (!station) {
         return res.status(400).json({
           error: 'POLLING_STATION_REQUIRED',
-          message: 'Select an active official Turbo Constituency polling station.',
+          message: 'Select an active official Turbo polling station, or propose a missing station under an official ward.',
         });
       }
-      // The official station registry controls the assignment geography.
+      // The official or pending station record controls the assignment geography.
       assignedCounty = station.county;
       assignedConstituency = station.constituency;
       assignedWard = station.ward;

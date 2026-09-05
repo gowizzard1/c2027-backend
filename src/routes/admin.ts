@@ -26,7 +26,7 @@ import {
   updateRoleAssignmentStatus, archiveRoleAssignment, restoreRoleAssignment,
   resetAccountAccess, recordAccountInviteResult,
   getAccountStipendRequests, getAssignmentMobilizerReports,
-  getPollingStations, addPollingStation, setPollingStationActive,
+  getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -225,6 +225,20 @@ router.patch('/polling-stations/:id', requireAdmin, async (req: Request, res: Re
       throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'active must be true or false.');
     }
     const station = await setPollingStationActive(req.params.id, req.body.active);
+    if (!station) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling station not found.');
+    return res.json(station);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/polling-stations/:id/review', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { action } = req.body;
+    if (action !== 'approve' && action !== 'reject') {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be approve or reject.');
+    }
+    const station = await updatePollingStationApproval(req.params.id, action === 'approve' ? 'approved' : 'rejected');
     if (!station) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling station not found.');
     return res.json(station);
   } catch (err) {

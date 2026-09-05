@@ -1083,17 +1083,17 @@ export async function getVolunteerAccountStats() {
 // ---- Turbo polling station registry ----
 export async function getPollingStations(includeInactive = false) {
   const stations = await prisma.pollingStation.findMany({
-    where: includeInactive ? {} : { active: true },
+    where: includeInactive ? {} : { active: true, approvalStatus: 'approved' },
     orderBy: [{ ward: 'asc' }, { name: 'asc' }],
   });
-  // Public polling-agent registration must only receive stations in the official ward set.
-  // Admin views include legacy/manual entries so they can be reviewed and deactivated.
+  // Public polling-agent registration must only receive approved stations in the official ward set.
+  // Admin views include legacy/manual/proposed entries so they can be reviewed.
   return includeInactive ? stations : stations.filter(station => isTurboWard(station.ward));
 }
 
 export async function getActiveTurboPollingStation(id: string) {
   const station = await prisma.pollingStation.findFirst({
-    where: { id, active: true, county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY },
+    where: { id, active: true, approvalStatus: 'approved', county: TURBO_COUNTY, constituency: TURBO_CONSTITUENCY },
   });
   return station && isTurboWard(station.ward) ? station : null;
 }
@@ -1106,7 +1106,45 @@ export async function addPollingStation(data: { name: string; ward: string }) {
 
 export async function setPollingStationActive(id: string, active: boolean) {
   try {
+    const station = await prisma.pollingStation.findUnique({ where: { id } });
+    if (!station || (active && station.approvalStatus !== 'approved')) return null;
     return await prisma.pollingStation.update({ where: { id }, data: { active } });
+  } catch {
+    return null;
+  }
+}
+
+export async function proposePollingStation(data: { name: string; ward: string; proposedByEmail: string }) {
+  const name = data.name.trim();
+  const ward = data.ward.trim();
+  const existing = await prisma.pollingStation.findFirst({
+    where: { name: { equals: name, mode: 'insensitive' }, ward: { equals: ward, mode: 'insensitive' } },
+  });
+  if (existing) return { station: existing, created: false };
+  const station = await prisma.pollingStation.create({
+    data: {
+      name,
+      ward,
+      county: TURBO_COUNTY,
+      constituency: TURBO_CONSTITUENCY,
+      active: false,
+      approvalStatus: 'pending',
+      proposedByEmail: data.proposedByEmail,
+      proposedAt: new Date(),
+    },
+  });
+  return { station, created: true };
+}
+
+export async function updatePollingStationApproval(id: string, approvalStatus: 'approved' | 'rejected') {
+  try {
+    return await prisma.pollingStation.update({
+      where: { id },
+      data: {
+        approvalStatus,
+        active: approvalStatus === 'approved',
+      },
+    });
   } catch {
     return null;
   }

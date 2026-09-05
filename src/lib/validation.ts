@@ -91,6 +91,8 @@ export const volunteerSchema = z.object({
   ward: z.string().min(2).max(50),
   role: z.enum(['polling_agent', 'mobilizer', 'social_media']),
   pollingStationId: z.string().min(1).max(100).optional(),
+  proposedPollingStationName: z.string().min(2).max(150).optional(),
+  proposedPollingStationWard: z.string().min(2).max(100).optional(),
   experience: z.string().max(500).optional(),
 });
 

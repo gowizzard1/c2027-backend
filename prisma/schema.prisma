@@ -278,6 +278,9 @@ model PollingStation {
   county       String   @default("Uasin Gishu")
   constituency String   @default("Turbo")
   active       Boolean  @default(true)
+  approvalStatus String @default("approved") // pending | approved | rejected
+  proposedByEmail String?
+  proposedAt   DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
