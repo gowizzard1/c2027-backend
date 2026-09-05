@@ -119,6 +119,8 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
     let assignedConstituency = constituency;
     let assignedWard = ward;
     let stationId: string | undefined;
+    let assignedStation: { id: string; name: string; ward: string; approvalStatus: string; active: boolean } | null = null;
+    let stationProposed = false;
 
     if (role === 'polling_agent') {
       if (county.trim().toLowerCase() !== TURBO_COUNTY.toLowerCase() || constituency.trim().toLowerCase() !== TURBO_CONSTITUENCY.toLowerCase()) {
@@ -150,6 +152,7 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
         }
         station = proposal.station;
         stationId = station.id;
+        stationProposed = proposal.created || station.approvalStatus === 'pending';
       }
 
       if (!station) {
@@ -162,6 +165,13 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
       assignedCounty = station.county;
       assignedConstituency = station.constituency;
       assignedWard = station.ward;
+      assignedStation = {
+        id: station.id,
+        name: station.name,
+        ward: station.ward,
+        approvalStatus: station.approvalStatus,
+        active: station.active,
+      };
     }
 
     const result = await registerVolunteerRole({
@@ -188,6 +198,7 @@ router.post('/', validate(volunteerSchema), async (req: Request, res: Response, 
         : `Your ${roleLabels[role] || role} role application was added to your existing volunteer account.`,
       accountId: result.account.id,
       assignmentId: result.assignment.id,
+      pollingStation: assignedStation ? { ...assignedStation, proposed: stationProposed } : null,
     });
   } catch (err) {
     next(err);
