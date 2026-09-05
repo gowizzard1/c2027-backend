@@ -92,8 +92,9 @@ export const volunteerSchema = z.object({
   role: z.enum(['polling_agent', 'mobilizer', 'social_media']),
   // Empty when the applicant proposes a currently unlisted station instead.
   pollingStationId: z.union([z.literal(''), z.string().min(1).max(100)]).optional(),
-  proposedPollingStationName: z.string().min(2).max(150).optional(),
-  proposedPollingStationWard: z.string().min(2).max(100).optional(),
+  // Blank for non-polling roles; enforced by the polling-agent route only when proposing a station.
+  proposedPollingStationName: z.union([z.literal(''), z.string().min(2).max(150)]).optional(),
+  proposedPollingStationWard: z.union([z.literal(''), z.string().min(2).max(100)]).optional(),
   experience: z.string().max(500).optional(),
 });
 
