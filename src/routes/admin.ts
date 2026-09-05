@@ -270,7 +270,18 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
     const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
     if (!name || name.length > 150 || party.length > 150 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
     if (imageUrl) {
-      try { new URL(imageUrl); } catch { throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL.'); }
+      const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
+      const isAbsoluteUrl = (() => {
+        try {
+          const url = new URL(imageUrl);
+          return url.protocol === 'https:' || url.protocol === 'http:';
+        } catch {
+          return false;
+        }
+      })();
+      if (!isLocalCandidateUpload && !isAbsoluteUrl) {
+        throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL or uploaded candidate image path.');
+      }
     }
     return res.status(201).json(await addElectionCandidate({ name, party: party || undefined, imageUrl: imageUrl || undefined }));
   } catch (err) {
