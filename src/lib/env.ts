@@ -55,6 +55,7 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_PUBLIC_URL: z.string().url().optional(),      // Public base URL for objects, e.g. https://pub-xxxx.r2.dev or CDN domain
+  PRIVATE_S3_BUCKET: z.string().optional(),         // Private bucket for polling result forms/election evidence
 
   // Email (SMTP) for volunteer invites. When unset, invite emails are logged, not sent.
   SMTP_HOST: z.string().optional(),

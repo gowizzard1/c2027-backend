@@ -26,7 +26,7 @@ export function isObjectStorageConfigured(): boolean {
 /** Private storage only needs authenticated bucket access; no public bucket URL. */
 export function isPrivateObjectStorageConfigured(): boolean {
   return !!(
-    process.env.S3_BUCKET &&
+    process.env.PRIVATE_S3_BUCKET &&
     process.env.S3_ACCESS_KEY_ID &&
     process.env.S3_SECRET_ACCESS_KEY
   );
@@ -88,13 +88,13 @@ export async function putPrivateObject(key: string, body: Buffer, contentType: s
     throw new Error('Private object storage is not configured');
   }
   await getClient().send(new PutObjectCommand({
-    Bucket: process.env.S3_BUCKET!,
+    Bucket: process.env.PRIVATE_S3_BUCKET!,
     Key: key,
     Body: body,
     ContentType: contentType,
     CacheControl: 'private, no-store',
   }));
-  logger.info({ key, bucket: process.env.S3_BUCKET }, 'Stored private object');
+  logger.info({ key, bucket: process.env.PRIVATE_S3_BUCKET }, 'Stored private object');
   return key;
 }
 
@@ -103,7 +103,7 @@ export async function getPrivateObject(key: string) {
   if (!isPrivateObjectStorageConfigured()) {
     throw new Error('Private object storage is not configured');
   }
-  const result = await getClient().send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET!, Key: key }));
+  const result = await getClient().send(new GetObjectCommand({ Bucket: process.env.PRIVATE_S3_BUCKET!, Key: key }));
   if (!result.Body) throw new Error('Private object not found');
   return { body: result.Body, contentType: result.ContentType || 'application/octet-stream' };
 }
