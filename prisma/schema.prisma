@@ -151,3 +151,17 @@ model Pledge {
 }
 
 
+
+// Privacy-conscious first-party site analytics. No IP address or raw user-agent is stored.
+model AnalyticsEvent {
+  id             String   @id @default(cuid())
+  visitorId      String   // Anonymous UUID generated and retained in browser localStorage
+  path           String
+  referrerDomain String?  // Domain only, never full referrer URL/query parameters
+  deviceType     String   // mobile | tablet | desktop | unknown
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([path, createdAt])
+  @@index([visitorId, createdAt])
+}

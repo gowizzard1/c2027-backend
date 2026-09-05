@@ -516,3 +516,87 @@ export async function deletePledge(id: string) {
     return false;
   }
 }
+
+// ---- First-party site analytics (anonymous, no IP/raw user-agent storage) ----
+export async function recordAnalyticsEvent(data: {
+  visitorId: string;
+  path: string;
+  referrerDomain?: string;
+  deviceType: string;
+}) {
+  return prisma.analyticsEvent.create({ data });
+}
+
+function countBy<T>(items: T[], keyOf: (item: T) => string) {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = keyOf(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Aggregate lightweight site metrics for the protected admin dashboard.
+ * Events are anonymous and only the requested recent date range is queried.
+ */
+export async function getAnalyticsSummary(days = 30) {
+  const safeDays = Math.max(1, Math.min(90, days));
+  const from = new Date();
+  from.setUTCHours(0, 0, 0, 0);
+  from.setUTCDate(from.getUTCDate() - (safeDays - 1));
+
+  const events = await prisma.analyticsEvent.findMany({
+    where: { createdAt: { gte: from } },
+    select: { visitorId: true, path: true, referrerDomain: true, deviceType: true, createdAt: true },
+  });
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const todayEvents = events.filter(event => event.createdAt >= today);
+
+  const dailyMap = new Map<string, { visitors: Set<string>; pageviews: number }>();
+  for (let index = safeDays - 1; index >= 0; index--) {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - index);
+    dailyMap.set(date.toISOString().slice(0, 10), { visitors: new Set(), pageviews: 0 });
+  }
+  for (const event of events) {
+    const day = event.createdAt.toISOString().slice(0, 10);
+    const bucket = dailyMap.get(day);
+    if (bucket) {
+      bucket.pageviews++;
+      bucket.visitors.add(event.visitorId);
+    }
+  }
+
+  const pageStats = new Map<string, { visitors: Set<string>; pageviews: number }>();
+  for (const event of events) {
+    const current = pageStats.get(event.path) || { visitors: new Set<string>(), pageviews: 0 };
+    current.pageviews++;
+    current.visitors.add(event.visitorId);
+    pageStats.set(event.path, current);
+  }
+
+  return {
+    days: safeDays,
+    totalPageviews: events.length,
+    uniqueVisitors: new Set(events.map(event => event.visitorId)).size,
+    todayPageviews: todayEvents.length,
+    todayVisitors: new Set(todayEvents.map(event => event.visitorId)).size,
+    daily: [...dailyMap.entries()].map(([date, value]) => ({
+      date,
+      pageviews: value.pageviews,
+      visitors: value.visitors.size,
+    })),
+    topPages: [...pageStats.entries()]
+      .map(([path, stats]) => ({ path, visitors: stats.visitors.size, pageviews: stats.pageviews }))
+      .sort((a, b) => b.pageviews - a.pageviews)
+      .slice(0, 8),
+    referrers: countBy(events, event => event.referrerDomain || 'Direct / unknown').slice(0, 8),
+    devices: countBy(events, event => event.deviceType).slice(0, 4),
+  };
+}

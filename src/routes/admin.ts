@@ -19,6 +19,7 @@ import {
   getBiography, upsertBioSection,
   getPaymentMode, setPaymentMode,
   getPledges, updatePledgeStatus, deletePledge,
+  getAnalyticsSummary,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -83,6 +84,16 @@ router.get('/stats', requireAdmin, async (req: Request, res: Response, next: Nex
       },
       campaign: progress,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- First-party site analytics ---
+router.get('/analytics', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days as string) || 30));
+    return res.json(await getAnalyticsSummary(days));
   } catch (err) {
     next(err);
   }
