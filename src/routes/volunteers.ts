@@ -7,6 +7,7 @@ import {
   setAccountPassword, recordAccountLoginSuccess, recordAccountLoginFailure,
   getAccountStipendStatus, createAccountStipendRequest,
   getAccountMobilizerDashboard, createAssignmentMobilizerReport,
+  getActiveTurboPollingStation, getPollingStations,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -72,6 +73,7 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
     county: selected.county,
     constituency: selected.constituency,
     ward: selected.ward,
+    pollingStation: selected.pollingStation ? { id: selected.pollingStation.id, name: selected.pollingStation.name, ward: selected.pollingStation.ward } : null,
     selectedAssignmentId: selected.id,
     assignments: assignments.map(assignment => ({
       id: assignment.id,
@@ -80,6 +82,7 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
       county: assignment.county,
       constituency: assignment.constituency,
       ward: assignment.ward,
+      pollingStation: assignment.pollingStation ? { id: assignment.pollingStation.id, name: assignment.pollingStation.name, ward: assignment.pollingStation.ward } : null,
     })),
     isSocialMedia: selected.role === 'social_media',
     isApproved,
@@ -90,10 +93,52 @@ async function toolkitPayload(account: any, selectedAssignment: any) {
   };
 }
 
+/** Public active official Turbo polling stations for the polling-agent registration form. */
+router.get('/polling-stations', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getPollingStations());
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/', validate(volunteerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, email, phone, idNumber, county, constituency, ward, role, experience } = req.body;
-    const result = await registerVolunteerRole({ name, email, phone, idNumber, county, constituency, ward, role, experience });
+    const { name, email, phone, idNumber, county, constituency, ward, role, experience, pollingStationId } = req.body;
+    let assignedCounty = county;
+    let assignedConstituency = constituency;
+    let assignedWard = ward;
+    let stationId: string | undefined;
+
+    if (role === 'polling_agent') {
+      if (county.trim().toLowerCase() !== 'uasin gishu' || constituency.trim().toLowerCase() !== 'turbo') {
+        return res.status(400).json({
+          error: 'POLLING_AGENT_LOCATION_REQUIRED',
+          message: 'Polling agents must be registered for Uasin Gishu County and Turbo Constituency.',
+        });
+      }
+      stationId = typeof pollingStationId === 'string' ? pollingStationId : '';
+      const station = stationId ? await getActiveTurboPollingStation(stationId) : null;
+      if (!station) {
+        return res.status(400).json({
+          error: 'POLLING_STATION_REQUIRED',
+          message: 'Select an active official Turbo Constituency polling station.',
+        });
+      }
+      // The official station registry controls the assignment geography.
+      assignedCounty = station.county;
+      assignedConstituency = station.constituency;
+      assignedWard = station.ward;
+    }
+
+    const result = await registerVolunteerRole({
+      name, email, phone, idNumber,
+      county: assignedCounty,
+      constituency: assignedConstituency,
+      ward: assignedWard,
+      role, experience,
+      pollingStationId: stationId,
+    });
     if (result.duplicateRole) {
       return res.status(409).json({
         error: 'ROLE_ALREADY_EXISTS',

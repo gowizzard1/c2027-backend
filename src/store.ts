@@ -815,6 +815,8 @@ const accountSelect = {
 
 const assignmentSelect = {
   id: true, accountId: true, role: true, experience: true, county: true, constituency: true, ward: true,
+  pollingStationId: true,
+  pollingStation: { select: { id: true, name: true, ward: true, active: true } },
   status: true, approvedAt: true, archivedAt: true, statusBeforeArchive: true, createdAt: true, updatedAt: true,
 } as const;
 
@@ -828,6 +830,7 @@ export async function registerVolunteerRole(data: {
   ward: string;
   role: string;
   experience?: string;
+  pollingStationId?: string;
 }) {
   const emailNormalized = normalizeVolunteerEmail(data.email);
   return prisma.$transaction(async tx => {
@@ -868,6 +871,7 @@ export async function registerVolunteerRole(data: {
         county: data.county.trim(),
         constituency: data.constituency.trim(),
         ward: data.ward.trim(),
+        pollingStationId: data.pollingStationId,
       },
     });
     return { account, assignment, createdAccount, duplicateRole: false };
@@ -888,12 +892,13 @@ export async function getVolunteerAccountByAccessToken(token: string) {
 }
 
 export async function getRoleAssignmentById(id: string) {
-  return prisma.volunteerRoleAssignment.findUnique({ where: { id } });
+  return prisma.volunteerRoleAssignment.findUnique({ where: { id }, include: { pollingStation: true } });
 }
 
 export async function getAccountAssignments(accountId: string, includeArchived = false) {
   return prisma.volunteerRoleAssignment.findMany({
     where: { accountId, ...(includeArchived ? {} : { status: { not: 'archived' } }) },
+    include: { pollingStation: true },
     orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
   });
 }
@@ -1072,4 +1077,32 @@ export async function getVolunteerAccountStats() {
     mobilizers: assignments.filter(assignment => assignment.role === 'mobilizer').length,
     socialMedia: assignments.filter(assignment => assignment.role === 'social_media').length,
   };
+}
+
+// ---- Turbo polling station registry ----
+export async function getPollingStations(includeInactive = false) {
+  return prisma.pollingStation.findMany({
+    where: includeInactive ? {} : { active: true },
+    orderBy: [{ ward: 'asc' }, { name: 'asc' }],
+  });
+}
+
+export async function getActiveTurboPollingStation(id: string) {
+  return prisma.pollingStation.findFirst({
+    where: { id, active: true, county: 'Uasin Gishu', constituency: 'Turbo' },
+  });
+}
+
+export async function addPollingStation(data: { name: string; ward: string }) {
+  return prisma.pollingStation.create({
+    data: { name: data.name.trim(), ward: data.ward.trim(), county: 'Uasin Gishu', constituency: 'Turbo' },
+  });
+}
+
+export async function setPollingStationActive(id: string, active: boolean) {
+  try {
+    return await prisma.pollingStation.update({ where: { id }, data: { active } });
+  } catch {
+    return null;
+  }
 }

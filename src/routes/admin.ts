@@ -26,6 +26,7 @@ import {
   updateRoleAssignmentStatus, archiveRoleAssignment, restoreRoleAssignment,
   resetAccountAccess, recordAccountInviteResult,
   getAccountStipendRequests, getAssignmentMobilizerReports,
+  getPollingStations, addPollingStation, setPollingStationActive,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -184,6 +185,42 @@ router.post('/volunteer-assignments/:id/restore', requireAdmin, async (req: Requ
     const assignment = await restoreRoleAssignment(req.params.id);
     if (!assignment) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived role assignment not found');
     return res.json(assignment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Turbo Constituency polling station registry ---
+router.get('/polling-stations', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const includeInactive = req.query.includeInactive === 'true';
+    return res.json(await getPollingStations(includeInactive));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/polling-stations', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const ward = typeof req.body?.ward === 'string' ? req.body.ward.trim() : '';
+    if (!name || !ward || name.length > 150 || ward.length > 100) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Station name and ward are required.');
+    }
+    return res.status(201).json(await addPollingStation({ name, ward }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/polling-stations/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (typeof req.body?.active !== 'boolean') {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'active must be true or false.');
+    }
+    const station = await setPollingStationActive(req.params.id, req.body.active);
+    if (!station) throw new AppError(404, ErrorCode.NOT_FOUND, 'Polling station not found.');
+    return res.json(station);
   } catch (err) {
     next(err);
   }

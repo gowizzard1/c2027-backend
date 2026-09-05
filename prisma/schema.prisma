@@ -250,6 +250,8 @@ model VolunteerRoleAssignment {
   county              String
   constituency        String
   ward                String
+  pollingStationId    String?
+  pollingStation      PollingStation? @relation(fields: [pollingStationId], references: [id], onDelete: Restrict)
   status              String   @default("pending")
   approvedAt          DateTime?
   archivedAt          DateTime?
@@ -264,4 +266,22 @@ model VolunteerRoleAssignment {
   @@index([status])
   @@index([role])
   @@index([county])
+  @@index([pollingStationId])
+}
+
+// Admin-managed official polling station registry for Turbo Constituency, Uasin Gishu.
+model PollingStation {
+  id           String   @id @default(cuid())
+  name         String
+  ward         String
+  county       String   @default("Uasin Gishu")
+  constituency String   @default("Turbo")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignments  VolunteerRoleAssignment[]
+
+  @@unique([name, ward])
+  @@index([active, ward])
 }
