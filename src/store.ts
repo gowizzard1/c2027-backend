@@ -1153,18 +1153,48 @@ export async function updatePollingStationApproval(id: string, approvalStatus: '
 // ---- Private polling-day result reporting ----
 export async function getElectionCandidates(includeInactive = false) {
   return prisma.electionCandidate.findMany({
-    where: includeInactive ? {} : { active: true },
+    where: includeInactive ? {} : { active: true, archivedAt: null },
     orderBy: { name: 'asc' },
   });
 }
 
-export async function addElectionCandidate(data: { name: string; party?: string }) {
-  return prisma.electionCandidate.create({ data: { name: data.name.trim(), party: data.party?.trim() || null } });
+export async function addElectionCandidate(data: { name: string; party?: string; imageUrl?: string }) {
+  return prisma.electionCandidate.create({
+    data: { name: data.name.trim(), party: data.party?.trim() || null, imageUrl: data.imageUrl?.trim() || null },
+  });
 }
 
 export async function setElectionCandidateActive(id: string, active: boolean) {
   try {
+    const candidate = await prisma.electionCandidate.findUnique({ where: { id } });
+    if (!candidate || candidate.archivedAt) return null;
     return await prisma.electionCandidate.update({ where: { id }, data: { active } });
+  } catch {
+    return null;
+  }
+}
+
+export async function archiveElectionCandidate(id: string) {
+  try {
+    const candidate = await prisma.electionCandidate.findUnique({ where: { id } });
+    if (!candidate || candidate.archivedAt) return null;
+    return await prisma.electionCandidate.update({
+      where: { id },
+      data: { archivedAt: new Date(), activeBeforeArchive: candidate.active, active: false },
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function restoreElectionCandidate(id: string) {
+  try {
+    const candidate = await prisma.electionCandidate.findUnique({ where: { id } });
+    if (!candidate || !candidate.archivedAt) return null;
+    return await prisma.electionCandidate.update({
+      where: { id },
+      data: { archivedAt: null, active: candidate.activeBeforeArchive ?? true, activeBeforeArchive: null },
+    });
   } catch {
     return null;
   }
@@ -1272,6 +1302,11 @@ export async function getPublicVerifiedPollingResults() {
     },
   });
 
+  const candidateRecords = await prisma.electionCandidate.findMany({
+    select: { id: true, name: true, party: true, imageUrl: true },
+  });
+  const candidateImages = new Map(candidateRecords.map(candidate => [candidate.id, candidate.imageUrl]));
+
   // Only the newest verified report for each station contributes to public totals.
   const byStation = new Map<string, typeof verifiedReports[number]>();
   for (const report of verifiedReports) {
@@ -1279,7 +1314,7 @@ export async function getPublicVerifiedPollingResults() {
   }
   const reports = [...byStation.values()];
 
-  const candidates = new Map<string, { id: string; name: string; party: string | null; votes: number }>();
+  const candidates = new Map<string, { id: string; name: string; party: string | null; imageUrl: string | null; votes: number }>();
   let totalValidVotes = 0;
   let totalRejectedVotes = 0;
   let lastUpdated: Date | null = null;
@@ -1292,7 +1327,13 @@ export async function getPublicVerifiedPollingResults() {
     try {
       const votes = JSON.parse(report.candidateVotesJson) as { candidateId: string; candidateName: string; party?: string | null; votes: number }[];
       for (const vote of votes) {
-        const current = candidates.get(vote.candidateId) || { id: vote.candidateId, name: vote.candidateName, party: vote.party || null, votes: 0 };
+        const current = candidates.get(vote.candidateId) || {
+          id: vote.candidateId,
+          name: vote.candidateName,
+          party: vote.party || null,
+          imageUrl: candidateImages.get(vote.candidateId) || null,
+          votes: 0,
+        };
         current.votes += Number(vote.votes) || 0;
         candidates.set(vote.candidateId, current);
       }

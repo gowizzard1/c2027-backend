@@ -28,6 +28,7 @@ import {
   getAccountStipendRequests, getAssignmentMobilizerReports,
   getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
   getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
+  archiveElectionCandidate, restoreElectionCandidate,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
@@ -265,8 +266,12 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const party = typeof req.body?.party === 'string' ? req.body.party.trim() : '';
-    if (!name || name.length > 150 || party.length > 150) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
-    return res.status(201).json(await addElectionCandidate({ name, party: party || undefined }));
+    const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
+    if (!name || name.length > 150 || party.length > 150 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
+    if (imageUrl) {
+      try { new URL(imageUrl); } catch { throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL.'); }
+    }
+    return res.status(201).json(await addElectionCandidate({ name, party: party || undefined, imageUrl: imageUrl || undefined }));
   } catch (err) {
     next(err);
   }
@@ -277,6 +282,26 @@ router.patch('/election-candidates/:id', requireAdmin, async (req: Request, res:
     if (typeof req.body?.active !== 'boolean') throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'active must be true or false.');
     const candidate = await setElectionCandidateActive(req.params.id, req.body.active);
     if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate not found.');
+    return res.json(candidate);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/election-candidates/:id/archive', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const candidate = await archiveElectionCandidate(req.params.id);
+    if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate not found or already archived.');
+    return res.json(candidate);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/election-candidates/:id/restore', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const candidate = await restoreElectionCandidate(req.params.id);
+    if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived candidate not found.');
     return res.json(candidate);
   } catch (err) {
     next(err);

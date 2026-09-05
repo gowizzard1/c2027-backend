@@ -296,7 +296,10 @@ model ElectionCandidate {
   id        String   @id @default(cuid())
   name      String
   party     String?
+  imageUrl  String?
   active    Boolean  @default(true)
+  archivedAt DateTime?
+  activeBeforeArchive Boolean?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
