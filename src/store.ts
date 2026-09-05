@@ -117,6 +117,15 @@ export async function addVolunteer(data: {
 export async function getVolunteers(options: PaginationOptions = {}) {
   const { page = 1, limit = 50 } = options;
   return prisma.volunteer.findMany({
+    // Explicitly omit passwordHash. Admins need support/activity information, but
+    // password hashes must never leave the server, even through an admin endpoint.
+    select: {
+      id: true, name: true, email: true, phone: true, idNumber: true,
+      county: true, constituency: true, ward: true, role: true, experience: true,
+      status: true, accessToken: true, createdAt: true, updatedAt: true,
+      inviteDeliveryStatus: true, inviteSentAt: true, inviteFailedAt: true,
+      activatedAt: true, lastLoginAt: true, lastLoginFailedAt: true, loginFailureCount: true,
+    },
     orderBy: { createdAt: 'desc' },
     skip: (page - 1) * limit,
     take: limit,
@@ -143,9 +152,38 @@ export async function setVolunteerAccessToken(id: string, token: string) {
   }
 }
 
-/** Set a volunteer's password hash (on activation). */
+/** Set a volunteer's password hash and record account activation. */
 export async function setVolunteerPassword(id: string, passwordHash: string) {
-  return prisma.volunteer.update({ where: { id }, data: { passwordHash } });
+  return prisma.volunteer.update({
+    where: { id },
+    data: { passwordHash, activatedAt: new Date(), lastLoginAt: new Date(), loginFailureCount: 0 },
+  });
+}
+
+/** Record a successful email/password login and clear the current failure count. */
+export async function recordVolunteerLoginSuccess(id: string) {
+  return prisma.volunteer.update({
+    where: { id },
+    data: { lastLoginAt: new Date(), loginFailureCount: 0 },
+  });
+}
+
+/** Record a failed login attempt for an existing volunteer account. */
+export async function recordVolunteerLoginFailure(id: string) {
+  return prisma.volunteer.update({
+    where: { id },
+    data: { lastLoginFailedAt: new Date(), loginFailureCount: { increment: 1 } },
+  });
+}
+
+/** Record whether an invite email was accepted by the configured email provider. */
+export async function recordVolunteerInviteResult(id: string, sent: boolean) {
+  return prisma.volunteer.update({
+    where: { id },
+    data: sent
+      ? { inviteDeliveryStatus: 'sent', inviteSentAt: new Date() }
+      : { inviteDeliveryStatus: 'failed', inviteFailedAt: new Date() },
+  });
 }
 
 /**
@@ -156,7 +194,12 @@ export async function regenerateVolunteerAccess(id: string, token: string) {
   try {
     return await prisma.volunteer.update({
       where: { id },
-      data: { accessToken: token, passwordHash: null },
+      data: {
+        accessToken: token,
+        passwordHash: null,
+        activatedAt: null,
+        inviteDeliveryStatus: 'not_sent',
+      },
     });
   } catch {
     return null;

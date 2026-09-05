@@ -6,6 +6,7 @@ import { sendVolunteerConfirmation } from '../services/notifications';
 import {
   addVolunteer, findVolunteerByAccessToken, findVolunteerByEmail,
   getVolunteerById, setVolunteerPassword, getSettings,
+  recordVolunteerLoginSuccess, recordVolunteerLoginFailure,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -147,9 +148,11 @@ router.post('/login', authLimiter, async (req: Request, res: Response, next: Nex
     }
     const ok = await bcrypt.compare(password, volunteer.passwordHash);
     if (!ok) {
+      await recordVolunteerLoginFailure(volunteer.id);
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' });
     }
 
+    await recordVolunteerLoginSuccess(volunteer.id);
     const token = createVolunteerSession(volunteer.id, volunteer.role);
     logger.info({ volunteerId: volunteer.id }, 'Volunteer logged in');
     return res.json({ success: true, token, ...(await toolkitPayload(volunteer)) });

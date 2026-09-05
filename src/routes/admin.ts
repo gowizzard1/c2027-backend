@@ -11,6 +11,7 @@ import logger from '../lib/logger';
 import {
   validateAdmin, getDonations, getVolunteers, getOrders,
   updateVolunteerStatus, updateOrderStatus, regenerateVolunteerAccess, deleteVolunteer,
+  recordVolunteerInviteResult,
   getNews, addNewsItem, updateNewsItem, deleteNewsItem,
   getProducts, addProduct, updateProduct, deleteProduct,
   getSettings, updateSettings, getDonationProgress,
@@ -124,8 +125,14 @@ router.patch('/volunteers/:id', requireAdmin, async (req: Request, res: Response
     if (status === 'approved' && previous && previous.status !== 'approved' && vol.accessToken) {
       const { activationLink, loginUrl } = volunteerLinks(vol.accessToken);
       sendVolunteerInvite({ to: vol.email, name: vol.name, email: vol.email, activationLink, loginUrl })
-        .then(sent => logger.info({ volunteerId: vol.id, sent }, 'Volunteer invite email dispatched'))
-        .catch(err => logger.warn({ err, volunteerId: vol.id }, 'Volunteer invite email failed'));
+        .then(async sent => {
+          await recordVolunteerInviteResult(vol.id, sent);
+          logger.info({ volunteerId: vol.id, sent }, 'Volunteer invite email dispatched');
+        })
+        .catch(async err => {
+          await recordVolunteerInviteResult(vol.id, false);
+          logger.warn({ err, volunteerId: vol.id }, 'Volunteer invite email failed');
+        });
     }
 
     return res.json(vol);
@@ -144,8 +151,14 @@ router.post('/volunteers/:id/reset-access', requireAdmin, async (req: Request, r
     // Email the fresh invite link automatically.
     const { activationLink, loginUrl } = volunteerLinks(token);
     sendVolunteerInvite({ to: vol.email, name: vol.name, email: vol.email, activationLink, loginUrl })
-      .then(sent => logger.info({ volunteerId: vol.id, sent }, 'Volunteer reset invite dispatched'))
-      .catch(err => logger.warn({ err, volunteerId: vol.id }, 'Volunteer reset invite failed'));
+      .then(async sent => {
+        await recordVolunteerInviteResult(vol.id, sent);
+        logger.info({ volunteerId: vol.id, sent }, 'Volunteer reset invite dispatched');
+      })
+      .catch(async err => {
+        await recordVolunteerInviteResult(vol.id, false);
+        logger.warn({ err, volunteerId: vol.id }, 'Volunteer reset invite failed');
+      });
 
     return res.json({ success: true, accessToken: token });
   } catch (err) {
