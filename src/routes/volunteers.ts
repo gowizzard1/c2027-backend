@@ -1,14 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { sendVolunteerConfirmation } from '../services/notifications';
 import {
-  addVolunteer, findVolunteerByAccessToken, findVolunteerByEmail,
-  getVolunteerById, setVolunteerPassword, getSettings,
-  recordVolunteerLoginSuccess, recordVolunteerLoginFailure,
-  getVolunteerStipendStatus, createStipendRequest,
-  getMobilizerDashboard, createMobilizerReport,
+  registerVolunteerRole, getVolunteerAccountByAccessToken, getVolunteerAccountByEmail,
+  getVolunteerAccountById, getRoleAssignmentById, getAccountAssignments,
+  setAccountPassword, recordAccountLoginSuccess, recordAccountLoginFailure,
+  getAccountStipendStatus, createAccountStipendRequest,
+  getAccountMobilizerDashboard, createAssignmentMobilizerReport,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter } from '../middleware/security';
@@ -24,50 +22,67 @@ const roleLabels: Record<string, string> = {
   social_media: 'Social Media Volunteer',
 };
 
-function generateAccessToken(): string {
-  return crypto.randomBytes(24).toString('base64url');
+function selectDefaultAssignment(assignments: any[]) {
+  return assignments.find(assignment => assignment.status === 'approved') || assignments[0] || null;
 }
 
-/** Shape the authenticated toolkit payload for a volunteer, gating social content. */
-async function toolkitPayload(volunteer: any) {
-  const configuredSettings = await getSettings();
-  const approvedSocial = volunteer.role === 'social_media' && volunteer.status === 'approved';
+async function loadSessionContext(req: Request) {
+  const session = (req as any).volunteer as { accountId: string; assignmentId: string; role: string; sessionVersion: number };
+  const [account, assignment] = await Promise.all([
+    getVolunteerAccountById(session.accountId),
+    getRoleAssignmentById(session.assignmentId),
+  ]);
+  if (!account || account.sessionVersion !== session.sessionVersion) {
+    throw new AppError(401, ErrorCode.SESSION_EXPIRED, 'Session expired. Please log in again.');
+  }
+  if (!assignment || assignment.accountId !== account.id || assignment.status === 'archived') {
+    throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'This role assignment is no longer available.');
+  }
+  return { account, assignment };
+}
+
+/** Build one dashboard payload for an account and its currently selected role. */
+async function toolkitPayload(account: any, selectedAssignment: any) {
+  const assignments = await getAccountAssignments(account.id);
+  const selected = assignments.find(assignment => assignment.id === selectedAssignment.id) || selectedAssignment;
+  const isApproved = selected.status === 'approved';
+  const approvedSocial = selected.role === 'social_media' && isApproved;
+  const stipend = await getAccountStipendStatus(account.id);
+
   let social: { groupLink: string; shareMessage: string; shareUrl: string } | null = null;
+  let mobilizer: any = null;
+  const { getSettings } = await import('../store');
+  const settings = await getSettings();
   if (approvedSocial) {
     social = {
-      // Prefer the dedicated social team group; fall back to the campaign WhatsApp
-      // group so configured existing settings remain useful in the portal.
-      groupLink: configuredSettings.socialGroupLink || configuredSettings.whatsappLink || '',
-      shareMessage: configuredSettings.socialShareMessage || '',
-      shareUrl: configuredSettings.socialShareUrl || '',
+      groupLink: settings.socialGroupLink || settings.whatsappLink || '',
+      shareMessage: settings.socialShareMessage || '',
+      shareUrl: settings.socialShareUrl || '',
     };
   }
-  const configuredActivationDelayDays = Math.max(0, Number(configuredSettings.stipendActivationDelayDays) || 0);
-  const stipend = volunteer.status === 'approved'
-    ? await getVolunteerStipendStatus(volunteer.id)
-    : {
-        canRequest: false,
-        reason: 'Mobile-data stipend requests are available after volunteer approval.',
-        nextEligibleAt: null,
-        latestRequest: null,
-        activationDelayDays: configuredActivationDelayDays,
-        repeatCooldownDays: 7,
-      };
-
-  const mobilizer = volunteer.role === 'mobilizer' && volunteer.status === 'approved'
-    ? await getMobilizerDashboard(volunteer.id)
-    : null;
+  if (selected.role === 'mobilizer' && isApproved) {
+    mobilizer = await getAccountMobilizerDashboard(selected.id);
+  }
 
   return {
-    name: volunteer.name,
-    email: volunteer.email,
-    county: volunteer.county,
-    constituency: volunteer.constituency,
-    ward: volunteer.ward,
-    role: volunteer.role,
-    status: volunteer.status,
-    isSocialMedia: volunteer.role === 'social_media',
-    isApproved: volunteer.status === 'approved',
+    name: account.name,
+    email: account.email,
+    role: selected.role,
+    status: selected.status,
+    county: selected.county,
+    constituency: selected.constituency,
+    ward: selected.ward,
+    selectedAssignmentId: selected.id,
+    assignments: assignments.map(assignment => ({
+      id: assignment.id,
+      role: assignment.role,
+      status: assignment.status,
+      county: assignment.county,
+      constituency: assignment.constituency,
+      ward: assignment.ward,
+    })),
+    isSocialMedia: selected.role === 'social_media',
+    isApproved,
     approvedSocial,
     social,
     stipend,
@@ -78,204 +93,152 @@ async function toolkitPayload(volunteer: any) {
 router.post('/', validate(volunteerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email, phone, idNumber, county, constituency, ward, role, experience } = req.body;
-    const id = uuidv4();
-    const accessToken = generateAccessToken();
-    await addVolunteer({ id, name, email, phone, idNumber, county, constituency, ward, role, experience, accessToken });
-    await sendVolunteerConfirmation({ phone, name, role: roleLabels[role] || role });
-    logger.info({ volunteerId: id, role, county }, 'Volunteer registered');
-    return res.json({ success: true, message: 'Volunteer registered successfully!', volunteerId: id });
-  } catch (err) {
-    next(err);
-  }
-});
+    const result = await registerVolunteerRole({ name, email, phone, idNumber, county, constituency, ward, role, experience });
+    if (result.duplicateRole) {
+      return res.status(409).json({
+        error: 'ROLE_ALREADY_EXISTS',
+        message: `This email already has a ${roleLabels[role] || role} role application. You cannot register the same role twice.`,
+      });
+    }
 
-/**
- * GET /api/volunteers/activation?key=<accessToken>
- * Validates an invite/activation link and reports whether the volunteer still
- * needs to set a password. Returns only their name + email (to prefill) — no
- * gated content until they authenticate.
- */
-router.get('/activation', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const key = typeof req.query.key === 'string' ? req.query.key.trim() : '';
-    if (key.length < 20) {
-      return res.status(400).json({ error: 'INVALID_LINK', message: 'Invalid or incomplete link.' });
-    }
-    const volunteer = await findVolunteerByAccessToken(key);
-    if (!volunteer) {
-      return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
-    }
-    if (volunteer.status === 'archived') {
-      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
-    }
-    return res.json({
-      valid: true,
-      name: volunteer.name,
-      email: volunteer.email,
-      needsPassword: !volunteer.passwordHash,
+    await sendVolunteerConfirmation({ phone: result.account.phone, name: result.account.name, role: roleLabels[role] || role });
+    logger.info({ accountId: result.account.id, assignmentId: result.assignment.id, role, createdAccount: result.createdAccount }, 'Volunteer role registered');
+    return res.status(201).json({
+      success: true,
+      message: result.createdAccount
+        ? 'Volunteer registered successfully! The campaign team will review your role application.'
+        : `Your ${roleLabels[role] || role} role application was added to your existing volunteer account.`,
+      accountId: result.account.id,
+      assignmentId: result.assignment.id,
     });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * POST /api/volunteers/activate  { key, password }
- * Sets the volunteer's password via their invite link, then logs them in.
- * The link stays valid but activation only sets a password if one isn't set yet
- * (to reset, the admin regenerates the token).
- */
+/** Validate an account activation link without exposing dashboard resources. */
+router.get('/activation', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = typeof req.query.key === 'string' ? req.query.key.trim() : '';
+    if (key.length < 20) return res.status(400).json({ error: 'INVALID_LINK', message: 'Invalid or incomplete link.' });
+    const account = await getVolunteerAccountByAccessToken(key);
+    if (!account) return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
+    const assignments = await getAccountAssignments(account.id);
+    if (assignments.length === 0) return res.status(403).json({ error: 'ACCOUNT_UNAVAILABLE', message: 'This volunteer account has no active role assignments.' });
+    return res.json({ valid: true, name: account.name, email: account.email, needsPassword: !account.passwordHash });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Activate one account via invitation and enter its default role dashboard. */
 router.post('/activate', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (key.length < 20) {
-      return res.status(400).json({ error: 'INVALID_LINK', message: 'Invalid activation link.' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'WEAK_PASSWORD', message: 'Password must be at least 8 characters.' });
-    }
+    if (key.length < 20) return res.status(400).json({ error: 'INVALID_LINK', message: 'Invalid activation link.' });
+    if (password.length < 8) return res.status(400).json({ error: 'WEAK_PASSWORD', message: 'Password must be at least 8 characters.' });
 
-    const volunteer = await findVolunteerByAccessToken(key);
-    if (!volunteer) {
-      return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
-    }
-    if (volunteer.status === 'archived') {
-      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
-    }
-    if (volunteer.passwordHash) {
-      return res.status(409).json({ error: 'ALREADY_ACTIVATED', message: 'This account already has a password. Please log in instead.' });
-    }
+    const account = await getVolunteerAccountByAccessToken(key);
+    if (!account) return res.status(404).json({ error: 'INVALID_LINK', message: 'This link is not valid.' });
+    if (account.passwordHash) return res.status(409).json({ error: 'ALREADY_ACTIVATED', message: 'This account already has a password. Please log in instead.' });
+    const assignments = await getAccountAssignments(account.id);
+    const selected = selectDefaultAssignment(assignments);
+    if (!selected) return res.status(403).json({ error: 'ACCOUNT_UNAVAILABLE', message: 'This account has no active role assignments.' });
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    await setVolunteerPassword(volunteer.id, passwordHash);
-    const token = createVolunteerSession(volunteer.id, volunteer.role);
-    logger.info({ volunteerId: volunteer.id }, 'Volunteer account activated');
-
-    return res.json({ success: true, token, ...(await toolkitPayload(volunteer)) });
+    const updatedAccount = await setAccountPassword(account.id, await bcrypt.hash(password, 10));
+    const token = createVolunteerSession(updatedAccount.id, selected.id, selected.role, updatedAccount.sessionVersion);
+    logger.info({ accountId: account.id }, 'Volunteer account activated');
+    return res.json({ success: true, token, ...(await toolkitPayload(updatedAccount, selected)) });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * POST /api/volunteers/login  { email, password }
- * Email + password login for an activated volunteer.
- */
+/** Login once by unique email and enter the account's default role assignment. */
 router.post('/login', authLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (!email || !password) {
-      return res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Email and password are required.' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Email and password are required.' });
 
-    const volunteer = await findVolunteerByEmail(email);
-    // Generic error to avoid revealing which part failed.
-    if (!volunteer || !volunteer.passwordHash) {
+    const account = await getVolunteerAccountByEmail(email);
+    if (!account || !account.passwordHash) return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' });
+    if (!await bcrypt.compare(password, account.passwordHash)) {
+      await recordAccountLoginFailure(account.id);
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' });
     }
-    const ok = await bcrypt.compare(password, volunteer.passwordHash);
-    if (!ok) {
-      await recordVolunteerLoginFailure(volunteer.id);
-      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' });
-    }
-    if (volunteer.status === 'archived') {
-      return res.status(403).json({ error: 'ACCOUNT_ARCHIVED', message: 'This volunteer account has been archived. Please contact the campaign team.' });
-    }
+    const assignments = await getAccountAssignments(account.id);
+    const selected = selectDefaultAssignment(assignments);
+    if (!selected) return res.status(403).json({ error: 'ACCOUNT_UNAVAILABLE', message: 'This account has no active role assignments.' });
 
-    await recordVolunteerLoginSuccess(volunteer.id);
-    const token = createVolunteerSession(volunteer.id, volunteer.role);
-    logger.info({ volunteerId: volunteer.id }, 'Volunteer logged in');
-    return res.json({ success: true, token, ...(await toolkitPayload(volunteer)) });
+    const updatedAccount = await recordAccountLoginSuccess(account.id);
+    const token = createVolunteerSession(updatedAccount.id, selected.id, selected.role, updatedAccount.sessionVersion);
+    logger.info({ accountId: account.id, assignmentId: selected.id }, 'Volunteer account logged in');
+    return res.json({ success: true, token, ...(await toolkitPayload(updatedAccount, selected)) });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * POST /api/volunteers/mobilizer/report (requires approved mobilizer session)
- * Submit one aggregate weekly field report. No named voter/contact data is accepted.
- */
+/** Switch the selected role within the authenticated volunteer account. */
+router.post('/switch-role', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { account } = await loadSessionContext(req);
+    const assignmentId = typeof req.body?.assignmentId === 'string' ? req.body.assignmentId : '';
+    const assignment = await getRoleAssignmentById(assignmentId);
+    if (!assignment || assignment.accountId !== account.id || assignment.status === 'archived') {
+      return res.status(403).json({ error: 'ROLE_UNAVAILABLE', message: 'That role is not available in this account.' });
+    }
+    const token = createVolunteerSession(account.id, assignment.id, assignment.role, account.sessionVersion);
+    return res.json({ success: true, token, ...(await toolkitPayload(account, assignment)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Submit one aggregate weekly report for the selected approved mobilizer assignment. */
 router.post('/mobilizer/report', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = (req as any).volunteer as { id: string };
-    const volunteer = await getVolunteerById(id);
-    if (!volunteer || volunteer.status !== 'approved' || volunteer.role !== 'mobilizer') {
-      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Weekly reports are available to approved mobilizers only.');
+    const { assignment } = await loadSessionContext(req);
+    if (assignment.status !== 'approved' || assignment.role !== 'mobilizer') {
+      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Weekly reports are available to approved mobilizer roles only.');
     }
-
     const peopleReached = Number(req.body?.peopleReached || 0);
     const meetingsHeld = Number(req.body?.meetingsHeld || 0);
     const newVolunteers = Number(req.body?.newVolunteers || 0);
     const keyIssues = typeof req.body?.keyIssues === 'string' ? req.body.keyIssues.trim() : '';
     const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
-    const counts = [peopleReached, meetingsHeld, newVolunteers];
-    if (counts.some(value => !Number.isInteger(value) || value < 0 || value > 100000) || keyIssues.length > 1000 || notes.length > 2000) {
-      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Please provide valid aggregate activity counts and concise notes.');
+    if ([peopleReached, meetingsHeld, newVolunteers].some(value => !Number.isInteger(value) || value < 0 || value > 100000) || keyIssues.length > 1000 || notes.length > 2000) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Please provide valid aggregate counts and concise notes.');
     }
-
-    const report = await createMobilizerReport(volunteer.id, {
-      peopleReached,
-      meetingsHeld,
-      newVolunteers,
-      keyIssues: keyIssues || undefined,
-      notes: notes || undefined,
-    });
-    if (!report) {
-      return res.status(409).json({ error: 'REPORT_EXISTS', message: 'You have already submitted a report for this week.' });
-    }
-
-    logger.info({ volunteerId: volunteer.id, reportId: report.id }, 'Mobilizer weekly report submitted');
-    return res.status(201).json({ success: true, report, mobilizer: await getMobilizerDashboard(volunteer.id) });
+    const report = await createAssignmentMobilizerReport(assignment.id, { peopleReached, meetingsHeld, newVolunteers, keyIssues: keyIssues || undefined, notes: notes || undefined });
+    if (!report) return res.status(409).json({ error: 'REPORT_EXISTS', message: 'You have already submitted a report for this week.' });
+    const { account } = await loadSessionContext(req);
+    return res.status(201).json({ success: true, report, ...(await toolkitPayload(account, assignment)) });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * POST /api/volunteers/stipend/request (requires volunteer session)
- * Creates a manually-reviewed mobile-data stipend request. Enforces approval,
- * one outstanding request, and a seven-day cooldown after approved/paid requests.
- */
+/** Request a person-level stipend; multiple roles never create multiple eligibility timelines. */
 router.post('/stipend/request', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = (req as any).volunteer as { id: string };
-    const volunteer = await getVolunteerById(id);
-    if (!volunteer || volunteer.status !== 'approved') {
-      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Stipend requests are available to approved volunteers only.');
-    }
-
-    const eligibility = await getVolunteerStipendStatus(volunteer.id);
-    if (!eligibility.canRequest) {
-      return res.status(429).json({
-        error: 'STIPEND_NOT_ELIGIBLE',
-        message: eligibility.reason,
-        nextEligibleAt: eligibility.nextEligibleAt,
-      });
-    }
-
-    const request = await createStipendRequest(volunteer.id);
-    logger.info({ volunteerId: volunteer.id, stipendRequestId: request.id }, 'Mobile-data stipend requested');
-    return res.status(201).json({ success: true, request, stipend: await getVolunteerStipendStatus(volunteer.id) });
+    const { account } = await loadSessionContext(req);
+    const eligibility = await getAccountStipendStatus(account.id);
+    if (!eligibility.canRequest) return res.status(429).json({ error: 'STIPEND_NOT_ELIGIBLE', message: eligibility.reason, nextEligibleAt: eligibility.nextEligibleAt });
+    const request = await createAccountStipendRequest(account.id);
+    logger.info({ accountId: account.id, stipendRequestId: request.id }, 'Mobile-data stipend requested');
+    return res.status(201).json({ success: true, request, stipend: await getAccountStipendStatus(account.id) });
   } catch (err) {
     next(err);
   }
 });
 
-/**
- * GET /api/volunteers/me  (requires volunteer JWT)
- * Returns the authenticated volunteer's toolkit (gated social content).
- */
 router.get('/me', requireVolunteer, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = (req as any).volunteer as { id: string };
-    const volunteer = await getVolunteerById(id);
-    if (!volunteer) throw new AppError(404, ErrorCode.NOT_FOUND, 'Volunteer record not found.');
-    if (volunteer.status === 'archived') {
-      throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'This volunteer account has been archived.');
-    }
-    return res.json(await toolkitPayload(volunteer));
+    const { account, assignment } = await loadSessionContext(req);
+    return res.json(await toolkitPayload(account, assignment));
   } catch (err) {
     next(err);
   }

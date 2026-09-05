@@ -22,6 +22,10 @@ import {
   getAnalyticsSummary,
   getStipendRequests, approveStipendRequest, rejectStipendRequest, markStipendRequestPaid,
   getMobilizerReports, updateMobilizerReportStatus,
+  getVolunteerAccounts, getVolunteerAccountById, getVolunteerAccountStats, getRoleAssignmentById,
+  updateRoleAssignmentStatus, archiveRoleAssignment, restoreRoleAssignment,
+  resetAccountAccess, recordAccountInviteResult,
+  getAccountStipendRequests, getAssignmentMobilizerReports,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -61,9 +65,9 @@ router.post('/login', authLimiter, validate(loginSchema), (req: Request, res: Re
 // --- Stats ---
 router.get('/stats', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [donations, volunteers, orders, progress] = await Promise.all([
+    const [donations, volunteerStats, orders, progress] = await Promise.all([
       getDonations({ limit: 1000 }),
-      getVolunteers({ limit: 1000 }),
+      getVolunteerAccountStats(),
       getOrders({ limit: 1000 }),
       getDonationProgress(),
     ]);
@@ -74,10 +78,11 @@ router.get('/stats', requireAdmin, async (req: Request, res: Response, next: Nex
         totalAmount: progress.raised,
       },
       volunteers: {
-        total: volunteers.length,
-        pollingAgents: volunteers.filter((v: any) => v.role === 'polling_agent').length,
-        mobilizers: volunteers.filter((v: any) => v.role === 'mobilizer').length,
-        socialMedia: volunteers.filter((v: any) => v.role === 'social_media').length,
+        total: volunteerStats.totalAccounts,
+        roleAssignments: volunteerStats.roleAssignments,
+        pollingAgents: volunteerStats.pollingAgents,
+        mobilizers: volunteerStats.mobilizers,
+        socialMedia: volunteerStats.socialMedia,
       },
       orders: {
         total: orders.length,
@@ -113,7 +118,78 @@ router.get('/donations', requireAdmin, async (req: Request, res: Response, next:
   }
 });
 
-// --- Volunteers (paginated) ---
+// --- Multi-role volunteer accounts (new account/assignment model) ---
+router.get('/volunteer-accounts', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const archived = req.query.archived === 'true';
+    return res.json(await getVolunteerAccounts({ page, limit, archived }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/volunteer-assignments/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { status } = req.body;
+    if (!['approved', 'rejected', 'suspended'].includes(status)) {
+      throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'status must be approved, rejected, or suspended');
+    }
+    const previous = await getRoleAssignmentById(req.params.id);
+    if (!previous || previous.status === 'archived') throw new AppError(404, ErrorCode.NOT_FOUND, 'Role assignment not found');
+    const assignment = await updateRoleAssignmentStatus(previous.id, status);
+    if (!assignment) throw new AppError(404, ErrorCode.NOT_FOUND, 'Role assignment not found');
+
+    // First account activation invite, not one invite per role. Additional approved roles
+    // appear on the existing account automatically after login.
+    const account = await getVolunteerAccountById(assignment.accountId);
+    if (status === 'approved' && previous.status !== 'approved' && previous.status !== 'suspended' && account && !account.passwordHash && account.accessToken) {
+      const { activationLink, loginUrl } = volunteerLinks(account.accessToken);
+      sendVolunteerInvite({ to: account.email, name: account.name, email: account.email, activationLink, loginUrl })
+        .then(async sent => { await recordAccountInviteResult(account.id, sent); logger.info({ accountId: account.id, assignmentId: assignment.id, sent }, 'Volunteer account invite dispatched'); })
+        .catch(async err => { await recordAccountInviteResult(account.id, false); logger.warn({ err, accountId: account.id, assignmentId: assignment.id }, 'Volunteer account invite failed'); });
+    }
+    return res.json(assignment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/volunteer-accounts/:id/reset-access', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { account, accessToken } = await resetAccountAccess(req.params.id);
+    const { activationLink, loginUrl } = volunteerLinks(accessToken);
+    sendVolunteerInvite({ to: account.email, name: account.name, email: account.email, activationLink, loginUrl })
+      .then(async sent => { await recordAccountInviteResult(account.id, sent); logger.info({ accountId: account.id, sent }, 'Account reset invite dispatched'); })
+      .catch(async err => { await recordAccountInviteResult(account.id, false); logger.warn({ err, accountId: account.id }, 'Account reset invite failed'); });
+    return res.json({ success: true, accessToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/volunteer-assignments/:id/archive', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const assignment = await archiveRoleAssignment(req.params.id);
+    if (!assignment) throw new AppError(404, ErrorCode.NOT_FOUND, 'Role assignment not found or already archived');
+    return res.json(assignment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/volunteer-assignments/:id/restore', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const assignment = await restoreRoleAssignment(req.params.id);
+    if (!assignment) throw new AppError(404, ErrorCode.NOT_FOUND, 'Archived role assignment not found');
+    return res.json(assignment);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Volunteers (legacy role rows; retained during migration window) ---
 router.get('/volunteers', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -215,7 +291,7 @@ router.get('/stipend-requests', requireAdmin, async (req: Request, res: Response
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
-    return res.json(await getStipendRequests({ page, limit }));
+    return res.json(await getAccountStipendRequests({ page, limit }));
   } catch (err) {
     next(err);
   }
@@ -246,7 +322,7 @@ router.get('/mobilizer-reports', requireAdmin, async (req: Request, res: Respons
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
-    return res.json(await getMobilizerReports({ page, limit }));
+    return res.json(await getAssignmentMobilizerReports({ page, limit }));
   } catch (err) {
     next(err);
   }

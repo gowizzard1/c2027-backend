@@ -24,17 +24,19 @@ export function createSession(username: string): string {
 }
 
 interface VolunteerJwtPayload {
-  sub: string;
+  sub: string;           // VolunteerAccount ID
   role: 'volunteer';
+  assignmentId: string;  // Selected VolunteerRoleAssignment ID
   vrole: string;
+  sessionVersion: number;
   iat: number;
   exp: number;
 }
 
-/** Session token for an authenticated volunteer (after activation or login). */
-export function createVolunteerSession(volunteerId: string, volunteerRole: string): string {
+/** Session token for an authenticated volunteer account and selected role assignment. */
+export function createVolunteerSession(accountId: string, assignmentId: string, volunteerRole: string, sessionVersion: number): string {
   return jwt.sign(
-    { sub: volunteerId, role: 'volunteer', vrole: volunteerRole },
+    { sub: accountId, role: 'volunteer', assignmentId, vrole: volunteerRole, sessionVersion },
     env().JWT_SECRET,
     { expiresIn: '7d' },
   );
@@ -52,7 +54,12 @@ export function requireVolunteer(req: Request, _res: Response, next: NextFunctio
     if (payload.role !== 'volunteer') {
       throw new AppError(403, ErrorCode.AUTHENTICATION_REQUIRED, 'Invalid session.');
     }
-    (req as any).volunteer = { id: payload.sub, role: payload.vrole };
+    (req as any).volunteer = {
+      accountId: payload.sub,
+      assignmentId: payload.assignmentId,
+      role: payload.vrole,
+      sessionVersion: payload.sessionVersion,
+    };
     next();
   } catch (err) {
     if (err instanceof AppError) throw err;

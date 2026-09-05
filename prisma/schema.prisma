@@ -171,7 +171,9 @@ model AnalyticsEvent {
 // Mobile-data stipend requests. Approval/payment is manual today; fields support future M-Pesa automation.
 model StipendRequest {
   id          String   @id @default(cuid())
-  volunteerId String
+  volunteerId String   // Legacy owner ID retained during migration window
+  accountId   String?
+  account     VolunteerAccount? @relation(fields: [accountId], references: [id], onDelete: Restrict)
   status      String   @default("pending") // pending | approved | paid | rejected
   requestedAt DateTime @default(now())
   approvedAt  DateTime?
@@ -181,13 +183,16 @@ model StipendRequest {
   paymentRef  String?  // Reserved for future M-Pesa transaction reference
 
   @@index([volunteerId, requestedAt])
+  @@index([accountId, requestedAt])
   @@index([status, requestedAt])
 }
 
 // Aggregate mobilizer activity report. Intentionally excludes named voter/contact lists and preference data.
 model MobilizerReport {
   id            String   @id @default(cuid())
-  volunteerId   String
+  volunteerId   String   // Legacy owner ID retained during migration window
+  assignmentId  String?
+  assignment    VolunteerRoleAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
   periodStart   DateTime // UTC Monday marking the reporting week
   peopleReached Int      @default(0)
   meetingsHeld  Int      @default(0)
@@ -201,6 +206,62 @@ model MobilizerReport {
   updatedAt     DateTime @updatedAt
 
   @@unique([volunteerId, periodStart])
+  @@unique([assignmentId, periodStart])
+  @@index([assignmentId, periodStart])
   @@index([status, createdAt])
   @@index([periodStart])
+}
+
+// Multi-role volunteer identity. One account per normalized email, one assignment per role.
+// Legacy Volunteer rows remain temporarily for migration/audit compatibility.
+model VolunteerAccount {
+  id                   String   @id
+  email                String
+  emailNormalized      String   @unique
+  name                 String
+  phone                String
+  idNumber             String
+  passwordHash         String?
+  accessToken          String?  @unique
+  inviteDeliveryStatus String   @default("not_sent")
+  inviteSentAt         DateTime?
+  inviteFailedAt       DateTime?
+  activatedAt          DateTime?
+  lastLoginAt          DateTime?
+  lastLoginFailedAt    DateTime?
+  loginFailureCount    Int      @default(0)
+  sessionVersion       Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  assignments          VolunteerRoleAssignment[]
+  stipendRequests      StipendRequest[]
+
+  @@index([email])
+}
+
+// A person can hold multiple roles, but never the same role twice.
+model VolunteerRoleAssignment {
+  id                  String   @id
+  accountId           String
+  account             VolunteerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  role                String
+  experience          String?
+  county              String
+  constituency        String
+  ward                String
+  status              String   @default("pending")
+  approvedAt          DateTime?
+  archivedAt          DateTime?
+  statusBeforeArchive String?
+  sourceVolunteerId   String?  @unique // legacy Volunteer row used to seed this assignment
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  mobilizerReports    MobilizerReport[]
+
+  @@unique([accountId, role])
+  @@index([status])
+  @@index([role])
+  @@index([county])
 }

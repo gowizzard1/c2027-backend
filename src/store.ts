@@ -1,6 +1,7 @@
 /**
  * Data access layer — all persistence via Prisma.
  */
+import crypto from 'crypto';
 import prisma from './db';
 import logger from './lib/logger';
 
@@ -792,4 +793,283 @@ export async function updateMobilizerReportStatus(id: string, status: 'reviewed'
   } catch {
     return null;
   }
+}
+
+// ---- Multi-role volunteer accounts ----
+// These functions are the new account/assignment layer. Legacy Volunteer functions remain
+// temporarily during the additive migration window, but new routes use this layer exclusively.
+export function normalizeVolunteerEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function newAccessToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+const accountSelect = {
+  id: true, email: true, emailNormalized: true, name: true, phone: true, idNumber: true,
+  accessToken: true, inviteDeliveryStatus: true, inviteSentAt: true, inviteFailedAt: true,
+  activatedAt: true, lastLoginAt: true, lastLoginFailedAt: true, loginFailureCount: true,
+  sessionVersion: true, createdAt: true, updatedAt: true,
+} as const;
+
+const assignmentSelect = {
+  id: true, accountId: true, role: true, experience: true, county: true, constituency: true, ward: true,
+  status: true, approvedAt: true, archivedAt: true, statusBeforeArchive: true, createdAt: true, updatedAt: true,
+} as const;
+
+export async function registerVolunteerRole(data: {
+  name: string;
+  email: string;
+  phone: string;
+  idNumber: string;
+  county: string;
+  constituency: string;
+  ward: string;
+  role: string;
+  experience?: string;
+}) {
+  const emailNormalized = normalizeVolunteerEmail(data.email);
+  return prisma.$transaction(async tx => {
+    let account = await tx.volunteerAccount.findUnique({ where: { emailNormalized } });
+    let createdAccount = false;
+
+    if (!account) {
+      account = await tx.volunteerAccount.create({
+        data: {
+          id: crypto.randomUUID(),
+          email: data.email.trim(),
+          emailNormalized,
+          name: data.name.trim(),
+          phone: data.phone.trim(),
+          idNumber: data.idNumber.trim(),
+          accessToken: newAccessToken(),
+        },
+      });
+      createdAccount = true;
+    } else if (!account.passwordHash && !account.accessToken) {
+      account = await tx.volunteerAccount.update({
+        where: { id: account.id },
+        data: { accessToken: newAccessToken() },
+      });
+    }
+
+    const existing = await tx.volunteerRoleAssignment.findUnique({
+      where: { accountId_role: { accountId: account.id, role: data.role } },
+    });
+    if (existing) return { account, assignment: existing, createdAccount, duplicateRole: true };
+
+    const assignment = await tx.volunteerRoleAssignment.create({
+      data: {
+        id: crypto.randomUUID(),
+        accountId: account.id,
+        role: data.role,
+        experience: data.experience,
+        county: data.county.trim(),
+        constituency: data.constituency.trim(),
+        ward: data.ward.trim(),
+      },
+    });
+    return { account, assignment, createdAccount, duplicateRole: false };
+  });
+}
+
+export async function getVolunteerAccountById(id: string) {
+  return prisma.volunteerAccount.findUnique({ where: { id } });
+}
+
+export async function getVolunteerAccountByEmail(email: string) {
+  return prisma.volunteerAccount.findUnique({ where: { emailNormalized: normalizeVolunteerEmail(email) } });
+}
+
+export async function getVolunteerAccountByAccessToken(token: string) {
+  if (!token) return null;
+  return prisma.volunteerAccount.findUnique({ where: { accessToken: token } });
+}
+
+export async function getRoleAssignmentById(id: string) {
+  return prisma.volunteerRoleAssignment.findUnique({ where: { id } });
+}
+
+export async function getAccountAssignments(accountId: string, includeArchived = false) {
+  return prisma.volunteerRoleAssignment.findMany({
+    where: { accountId, ...(includeArchived ? {} : { status: { not: 'archived' } }) },
+    orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+  });
+}
+
+export async function setAccountPassword(accountId: string, passwordHash: string) {
+  return prisma.volunteerAccount.update({
+    where: { id: accountId },
+    data: { passwordHash, activatedAt: new Date(), lastLoginAt: new Date(), loginFailureCount: 0, sessionVersion: { increment: 1 } },
+  });
+}
+
+export async function recordAccountLoginSuccess(accountId: string) {
+  return prisma.volunteerAccount.update({
+    where: { id: accountId },
+    data: { lastLoginAt: new Date(), loginFailureCount: 0 },
+  });
+}
+
+export async function recordAccountLoginFailure(accountId: string) {
+  return prisma.volunteerAccount.update({
+    where: { id: accountId },
+    data: { lastLoginFailedAt: new Date(), loginFailureCount: { increment: 1 } },
+  });
+}
+
+export async function recordAccountInviteResult(accountId: string, sent: boolean) {
+  return prisma.volunteerAccount.update({
+    where: { id: accountId },
+    data: sent
+      ? { inviteDeliveryStatus: 'sent', inviteSentAt: new Date() }
+      : { inviteDeliveryStatus: 'failed', inviteFailedAt: new Date() },
+  });
+}
+
+export async function resetAccountAccess(accountId: string) {
+  const accessToken = newAccessToken();
+  const account = await prisma.volunteerAccount.update({
+    where: { id: accountId },
+    data: {
+      accessToken,
+      passwordHash: null,
+      activatedAt: null,
+      inviteDeliveryStatus: 'not_sent',
+      sessionVersion: { increment: 1 },
+    },
+  });
+  return { account, accessToken };
+}
+
+export async function updateRoleAssignmentStatus(id: string, status: string) {
+  const assignment = await prisma.volunteerRoleAssignment.findUnique({ where: { id } });
+  if (!assignment || assignment.status === 'archived') return null;
+  return prisma.volunteerRoleAssignment.update({
+    where: { id },
+    data: {
+      status,
+      ...(status === 'approved' && !assignment.approvedAt ? { approvedAt: new Date() } : {}),
+    },
+  });
+}
+
+export async function archiveRoleAssignment(id: string) {
+  const assignment = await prisma.volunteerRoleAssignment.findUnique({ where: { id } });
+  if (!assignment || assignment.status === 'archived') return null;
+  return prisma.volunteerRoleAssignment.update({
+    where: { id },
+    data: { status: 'archived', archivedAt: new Date(), statusBeforeArchive: assignment.status },
+  });
+}
+
+export async function restoreRoleAssignment(id: string) {
+  const assignment = await prisma.volunteerRoleAssignment.findUnique({ where: { id } });
+  if (!assignment || assignment.status !== 'archived') return null;
+  return prisma.volunteerRoleAssignment.update({
+    where: { id },
+    data: { status: assignment.statusBeforeArchive || 'pending', archivedAt: null, statusBeforeArchive: null },
+  });
+}
+
+export async function getVolunteerAccounts(options: PaginationOptions & { archived?: boolean } = {}) {
+  const { page = 1, limit = 50, archived = false } = options;
+  const assignmentWhere = archived ? { status: 'archived' } : { status: { not: 'archived' } };
+  return prisma.volunteerAccount.findMany({
+    where: { assignments: { some: assignmentWhere } },
+    select: {
+      ...accountSelect,
+      assignments: { where: assignmentWhere, select: assignmentSelect, orderBy: { createdAt: 'asc' } },
+    },
+    orderBy: { createdAt: 'desc' },
+    skip: (page - 1) * limit,
+    take: limit,
+  });
+}
+
+export async function getAccountStipendStatus(accountId: string) {
+  const [account, settings, approvedAssignments] = await Promise.all([
+    prisma.volunteerAccount.findUnique({ where: { id: accountId } }),
+    getSettings(),
+    prisma.volunteerRoleAssignment.findMany({
+      where: { accountId, status: 'approved' },
+      select: { approvedAt: true, createdAt: true },
+      orderBy: { approvedAt: 'asc' },
+    }),
+  ]);
+  const activationDelayDays = Math.max(0, Number(settings.stipendActivationDelayDays) || 0);
+  const repeatCooldownDays = STIPEND_REPEAT_COOLDOWN_DAYS;
+  if (!account || approvedAssignments.length === 0) {
+    return { canRequest: false, reason: 'Mobile-data stipend requests require at least one approved active role.', nextEligibleAt: null, latestRequest: null, activationDelayDays, repeatCooldownDays };
+  }
+  const activeSince = approvedAssignments[0].approvedAt || approvedAssignments[0].createdAt;
+  const firstEligibleAt = new Date(activeSince.getTime() + activationDelayDays * DAY_MS);
+  if (firstEligibleAt > new Date()) {
+    return { canRequest: false, reason: `Mobile-data stipend requests become available after ${activationDelayDays} active day${activationDelayDays === 1 ? '' : 's'}.`, nextEligibleAt: firstEligibleAt, latestRequest: null, activationDelayDays, repeatCooldownDays };
+  }
+  const pending = await prisma.stipendRequest.findFirst({ where: { accountId, status: 'pending' }, orderBy: { requestedAt: 'desc' } });
+  if (pending) return { canRequest: false, reason: 'A stipend request is already awaiting review.', nextEligibleAt: null, latestRequest: pending, activationDelayDays, repeatCooldownDays };
+  const latestIssued = await prisma.stipendRequest.findFirst({ where: { accountId, status: { in: ['approved', 'paid'] } }, orderBy: { requestedAt: 'desc' } });
+  if (!latestIssued) return { canRequest: true, reason: null, nextEligibleAt: null, latestRequest: null, activationDelayDays, repeatCooldownDays };
+  const issuedAt = latestIssued.paidAt || latestIssued.approvedAt || latestIssued.requestedAt;
+  const nextEligibleAt = new Date(issuedAt.getTime() + repeatCooldownDays * DAY_MS);
+  return { canRequest: nextEligibleAt <= new Date(), reason: nextEligibleAt <= new Date() ? null : `Mobile-data stipends are available once every ${repeatCooldownDays} days after approval.`, nextEligibleAt: nextEligibleAt <= new Date() ? null : nextEligibleAt, latestRequest: latestIssued, activationDelayDays, repeatCooldownDays };
+}
+
+export async function createAccountStipendRequest(accountId: string) {
+  return prisma.stipendRequest.create({ data: { volunteerId: accountId, accountId } });
+}
+
+export async function getAccountMobilizerDashboard(assignmentId: string) {
+  const periodStart = currentWeekStartUtc();
+  const [currentReport, recentReports, settings] = await Promise.all([
+    prisma.mobilizerReport.findUnique({ where: { assignmentId_periodStart: { assignmentId, periodStart } } }),
+    prisma.mobilizerReport.findMany({ where: { assignmentId }, orderBy: { periodStart: 'desc' }, take: 4 }),
+    getSettings(),
+  ]);
+  return { groupLink: settings.mobilizerGroupLink || settings.whatsappLink || '', periodStart, currentReport, recentReports };
+}
+
+export async function createAssignmentMobilizerReport(assignmentId: string, data: {
+  peopleReached: number; meetingsHeld: number; newVolunteers: number; keyIssues?: string; notes?: string;
+}) {
+  const periodStart = currentWeekStartUtc();
+  try {
+    return await prisma.mobilizerReport.create({ data: { volunteerId: assignmentId, assignmentId, periodStart, ...data } });
+  } catch {
+    return null;
+  }
+}
+
+export async function getAccountStipendRequests(options: PaginationOptions = {}) {
+  const { page = 1, limit = 50 } = options;
+  const requests = await prisma.stipendRequest.findMany({ where: { accountId: { not: null } }, orderBy: { requestedAt: 'desc' }, skip: (page - 1) * limit, take: limit });
+  const accountIds = [...new Set(requests.map(request => request.accountId).filter(Boolean) as string[])];
+  const accounts = await prisma.volunteerAccount.findMany({ where: { id: { in: accountIds } }, select: { id: true, name: true, email: true, phone: true } });
+  const byId = new Map(accounts.map(account => [account.id, account]));
+  return requests.map(request => ({ ...request, account: request.accountId ? byId.get(request.accountId) || null : null }));
+}
+
+export async function getAssignmentMobilizerReports(options: PaginationOptions = {}) {
+  const { page = 1, limit = 50 } = options;
+  const reports = await prisma.mobilizerReport.findMany({ where: { assignmentId: { not: null } }, orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit });
+  const assignmentIds = [...new Set(reports.map(report => report.assignmentId).filter(Boolean) as string[])];
+  const assignments = await prisma.volunteerRoleAssignment.findMany({ where: { id: { in: assignmentIds } }, include: { account: { select: { name: true, email: true, phone: true } } } });
+  const byId = new Map(assignments.map(assignment => [assignment.id, assignment]));
+  return reports.map(report => ({ ...report, assignment: report.assignmentId ? byId.get(report.assignmentId) || null : null }));
+}
+
+export async function getVolunteerAccountStats() {
+  const [accounts, assignments] = await Promise.all([
+    prisma.volunteerAccount.count({ where: { assignments: { some: { status: { not: 'archived' } } } } }),
+    prisma.volunteerRoleAssignment.findMany({ where: { status: { not: 'archived' } }, select: { role: true } }),
+  ]);
+  return {
+    totalAccounts: accounts,
+    roleAssignments: assignments.length,
+    pollingAgents: assignments.filter(assignment => assignment.role === 'polling_agent').length,
+    mobilizers: assignments.filter(assignment => assignment.role === 'mobilizer').length,
+    socialMedia: assignments.filter(assignment => assignment.role === 'social_media').length,
+  };
 }
