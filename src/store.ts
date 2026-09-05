@@ -1390,3 +1390,14 @@ export async function deleteElectionCandidate(id: string) {
     return false;
   }
 }
+
+export async function updateElectionCandidate(id: string, data: { name: string; party?: string; imageUrl?: string }) {
+  try {
+    return await prisma.electionCandidate.update({
+      where: { id },
+      data: { name: data.name.trim(), party: data.party?.trim() || null, imageUrl: data.imageUrl?.trim() || null },
+    });
+  } catch {
+    return null;
+  }
+}

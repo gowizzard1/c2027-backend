@@ -30,6 +30,7 @@ import {
   getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
   archiveElectionCandidate, restoreElectionCandidate,
   deleteElectionCandidate,
+  updateElectionCandidate,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
@@ -284,6 +285,25 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
       }
     }
     return res.status(201).json(await addElectionCandidate({ name, party: party || undefined, imageUrl: imageUrl || undefined }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/election-candidates/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const party = typeof req.body?.party === 'string' ? req.body.party.trim() : '';
+    const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
+    if (!name || name.length > 150 || party.length > 150 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
+    if (imageUrl) {
+      const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
+      const isAbsoluteUrl = (() => { try { const url = new URL(imageUrl); return url.protocol === 'https:' || url.protocol === 'http:'; } catch { return false; } })();
+      if (!isLocalCandidateUpload && !isAbsoluteUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL or uploaded candidate image path.');
+    }
+    const candidate = await updateElectionCandidate(req.params.id, { name, party: party || undefined, imageUrl: imageUrl || undefined });
+    if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate not found or update conflicts with an existing candidate.');
+    return res.json(candidate);
   } catch (err) {
     next(err);
   }
