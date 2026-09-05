@@ -124,7 +124,7 @@ export const newsSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   content: z.string().max(10000).optional().default(''),
   category: z.string().max(50).optional().default('General'),
-  type: z.enum(['news', 'event', 'photo']),
+  type: z.enum(['news', 'statement', 'event', 'photo']),
   image: z.string().max(500).optional(),
   emoji: z.string().max(10).optional(),
   time: z.string().max(50).optional(),
