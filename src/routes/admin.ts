@@ -31,6 +31,7 @@ import {
   archiveElectionCandidate, restoreElectionCandidate,
   deleteElectionCandidate,
   updateElectionCandidate,
+  getMobileAppReleases, createMobileAppRelease, activateMobileAppRelease, archiveMobileAppRelease, deleteMobileAppRelease,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
@@ -394,6 +395,61 @@ router.get('/polling-results/:reportId/attachments/:attachmentId', requireAdmin,
     res.setHeader('Content-Disposition', `inline; filename="${attachment.originalName.replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.send(Buffer.from(bytes));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Mobile app release distribution ---
+router.get('/mobile-app-releases', requireAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getMobileAppReleases());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/mobile-app-releases', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const platform = req.body?.platform === 'ios' ? 'ios' : 'android';
+    const version = typeof req.body?.version === 'string' ? req.body.version.trim() : '';
+    const buildNumber = typeof req.body?.buildNumber === 'string' ? req.body.buildNumber.trim() : '';
+    const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl.trim() : '';
+    const externalUrl = typeof req.body?.externalUrl === 'string' ? req.body.externalUrl.trim() : '';
+    const releaseNotes = typeof req.body?.releaseNotes === 'string' ? req.body.releaseNotes.trim() : '';
+    if (!version || version.length > 50 || releaseNotes.length > 2000) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Version is required and release notes must be concise.');
+    if (platform === 'android' && !fileUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Upload an Android APK before publishing this release.');
+    if (platform === 'ios' && !externalUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Provide a TestFlight or App Store link for iOS.');
+    return res.status(201).json(await createMobileAppRelease({ platform, version, buildNumber: buildNumber || undefined, fileUrl: fileUrl || undefined, externalUrl: externalUrl || undefined, releaseNotes: releaseNotes || undefined }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/mobile-app-releases/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { action } = req.body;
+    if (action === 'activate') {
+      const release = await activateMobileAppRelease(req.params.id);
+      if (!release) throw new AppError(404, ErrorCode.NOT_FOUND, 'Release not found or archived.');
+      return res.json(release);
+    }
+    if (action === 'archive') {
+      const release = await archiveMobileAppRelease(req.params.id);
+      if (!release) throw new AppError(404, ErrorCode.NOT_FOUND, 'Release not found.');
+      return res.json(release);
+    }
+    throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'action must be activate or archive.');
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/mobile-app-releases/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = await deleteMobileAppRelease(req.params.id);
+    if (!deleted) throw new AppError(404, ErrorCode.NOT_FOUND, 'Release not found.');
+    return res.json({ success: true });
   } catch (err) {
     next(err);
   }

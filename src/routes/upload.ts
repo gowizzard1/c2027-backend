@@ -11,6 +11,7 @@ const router = Router();
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_APK_BYTES = 120 * 1024 * 1024; // 120MB
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 // Keep the file in memory so we can push it to object storage or write to disk.
@@ -25,6 +26,33 @@ const upload = multer({
     }
   },
 });
+
+const apkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_APK_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const isApk = path.extname(file.originalname).toLowerCase() === '.apk';
+    if (!isApk) {
+      cb(new Error('Only Android APK files can be uploaded.'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+function parseApkUpload(fieldName: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    apkUpload.single(fieldName)(req, res, (err: any) => {
+      if (err) {
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'APK_TOO_LARGE', message: 'APK must be 120MB or smaller.' });
+        }
+        return res.status(400).json({ error: 'APK_UPLOAD_FAILED', message: err.message || 'APK upload failed.' });
+      }
+      next();
+    });
+  };
+}
 
 function parseUpload(fieldName: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -84,6 +112,33 @@ router.post(
     } catch (err) {
       logger.error({ err }, 'Failed to store candidate image');
       return res.status(500).json({ error: 'STORAGE_ERROR', message: 'Could not save the candidate image. Please try again.' });
+    }
+  },
+);
+
+async function storePublicApk(file: Express.Multer.File) {
+  const filename = `mobile-apps/ikm-campaign-team-${crypto.randomUUID()}.apk`;
+  if (isObjectStorageConfigured()) {
+    return putObject(filename, file.buffer, 'application/vnd.android.package-archive');
+  }
+  const localPath = path.join(UPLOADS_DIR, filename);
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+  await fs.writeFile(localPath, file.buffer);
+  return `/uploads/${filename}`;
+}
+
+router.post(
+  '/mobile-apk',
+  requireAdmin,
+  parseApkUpload('apk'),
+  async (req: Request, res: Response) => {
+    if (!req.file) return res.status(400).json({ error: 'NO_FILE', message: 'No APK uploaded.' });
+    try {
+      const url = await storePublicApk(req.file);
+      return res.status(201).json({ url, size: req.file.size, originalName: req.file.originalname });
+    } catch (err) {
+      logger.error({ err }, 'Failed to store mobile APK');
+      return res.status(500).json({ error: 'STORAGE_ERROR', message: 'Could not save the APK. Configure durable public storage for production releases.' });
     }
   },
 );

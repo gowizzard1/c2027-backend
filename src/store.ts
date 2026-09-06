@@ -1401,3 +1401,55 @@ export async function updateElectionCandidate(id: string, data: { name: string; 
     return null;
   }
 }
+
+// ---- Mobile app release distribution ----
+export async function getActiveMobileAppRelease(platform = 'android') {
+  return prisma.mobileAppRelease.findFirst({
+    where: { platform, active: true, archivedAt: null },
+    orderBy: { updatedAt: 'desc' },
+  });
+}
+
+export async function getMobileAppReleases(platform?: string) {
+  return prisma.mobileAppRelease.findMany({
+    where: platform ? { platform } : {},
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function createMobileAppRelease(data: {
+  platform: string;
+  version: string;
+  buildNumber?: string;
+  fileUrl?: string;
+  externalUrl?: string;
+  releaseNotes?: string;
+}) {
+  return prisma.mobileAppRelease.create({ data });
+}
+
+export async function activateMobileAppRelease(id: string) {
+  const release = await prisma.mobileAppRelease.findUnique({ where: { id } });
+  if (!release || release.archivedAt) return null;
+  return prisma.$transaction(async tx => {
+    await tx.mobileAppRelease.updateMany({ where: { platform: release.platform }, data: { active: false } });
+    return tx.mobileAppRelease.update({ where: { id }, data: { active: true } });
+  });
+}
+
+export async function archiveMobileAppRelease(id: string) {
+  try {
+    return await prisma.mobileAppRelease.update({ where: { id }, data: { active: false, archivedAt: new Date() } });
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteMobileAppRelease(id: string) {
+  try {
+    await prisma.mobileAppRelease.delete({ where: { id } });
+    return true;
+  } catch {
+    return false;
+  }
+}

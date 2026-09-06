@@ -346,3 +346,21 @@ model PollingResultAttachment {
 
   @@index([reportId])
 }
+
+// Admin-published mobile application releases. Android APK files are public campaign app downloads.
+model MobileAppRelease {
+  id           String   @id @default(cuid())
+  platform     String   @default("android") // android | ios
+  version      String
+  buildNumber  String?
+  fileUrl      String?
+  externalUrl  String?
+  releaseNotes String?
+  active       Boolean  @default(false)
+  archivedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([platform, active])
+  @@index([archivedAt])
+}
