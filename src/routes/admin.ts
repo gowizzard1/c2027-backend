@@ -414,13 +414,13 @@ router.post('/mobile-app-releases', requireAdmin, async (req: Request, res: Resp
     const platform = req.body?.platform === 'ios' ? 'ios' : 'android';
     const version = typeof req.body?.version === 'string' ? req.body.version.trim() : '';
     const buildNumber = typeof req.body?.buildNumber === 'string' ? req.body.buildNumber.trim() : '';
-    const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl.trim() : '';
+    const artifactKey = typeof req.body?.artifactKey === 'string' ? req.body.artifactKey.trim() : '';
     const externalUrl = typeof req.body?.externalUrl === 'string' ? req.body.externalUrl.trim() : '';
     const releaseNotes = typeof req.body?.releaseNotes === 'string' ? req.body.releaseNotes.trim() : '';
     if (!version || version.length > 50 || releaseNotes.length > 2000) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Version is required and release notes must be concise.');
-    if (platform === 'android' && !fileUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Upload an Android APK before publishing this release.');
+    if (platform === 'android' && !artifactKey) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Upload an Android APK before publishing this release.');
     if (platform === 'ios' && !externalUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Provide a TestFlight or App Store link for iOS.');
-    return res.status(201).json(await createMobileAppRelease({ platform, version, buildNumber: buildNumber || undefined, fileUrl: fileUrl || undefined, externalUrl: externalUrl || undefined, releaseNotes: releaseNotes || undefined }));
+    return res.status(201).json(await createMobileAppRelease({ platform, version, buildNumber: buildNumber || undefined, fileUrl: artifactKey || undefined, externalUrl: externalUrl || undefined, releaseNotes: releaseNotes || undefined }));
   } catch (err) {
     next(err);
   }

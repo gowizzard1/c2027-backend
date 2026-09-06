@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults, getActiveMobileAppRelease } from '../store';
+import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults } from '../store';
 
 const router = Router();
 
@@ -49,16 +49,6 @@ router.get('/biography', async (_req: Request, res: Response, next: NextFunction
 router.get('/payment-mode', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     return res.json({ mode: await getPaymentMode() });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/mobile-app', async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const android = await getActiveMobileAppRelease('android');
-    const ios = await getActiveMobileAppRelease('ios');
-    return res.json({ android, ios });
   } catch (err) {
     next(err);
   }

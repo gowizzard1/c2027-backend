@@ -13,6 +13,7 @@ import {
   getActiveTurboPollingStation, getPollingStations,
   proposePollingStation,
   getElectionCandidates, createPollingResultReport, getPollingResultForAssignment,
+  getActiveMobileAppRelease,
 } from '../store';
 import { validate, volunteerSchema } from '../lib/validation';
 import { authLimiter, registrationLimiter, volunteerActionLimiter, resultUploadLimiter } from '../middleware/security';
@@ -20,7 +21,7 @@ import { createVolunteerSession, requireVolunteer } from '../middleware/auth';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
 import { TURBO_COUNTY, TURBO_CONSTITUENCY, TURBO_WARDS, isTurboWard } from '../lib/polling';
-import { isPrivateObjectStorageConfigured, putPrivateObject } from '../services/storage';
+import { isPrivateObjectStorageConfigured, putPrivateObject, getPrivateObject } from '../services/storage';
 
 const router = Router();
 
@@ -418,6 +419,67 @@ router.post('/stipend/request', requireVolunteer, volunteerActionLimiter, async 
     const request = await createAccountStipendRequest(account.id);
     logger.info({ accountId: account.id, stipendRequestId: request.id }, 'Mobile-data stipend requested');
     return res.status(201).json({ success: true, request, stipend: await getAccountStipendStatus(account.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/mobile-app', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await loadSessionContext(req);
+    const [android, ios] = await Promise.all([
+      getActiveMobileAppRelease('android'),
+      getActiveMobileAppRelease('ios'),
+    ]);
+    return res.json({
+      android: android ? {
+        version: android.version,
+        buildNumber: android.buildNumber,
+        releaseNotes: android.releaseNotes,
+        updatedAt: android.updatedAt,
+        downloadPath: android.fileUrl ? '/api/volunteers/mobile-app/android/download' : null,
+      } : null,
+      // Third-party App Store/TestFlight links can only be revealed after login,
+      // but their destination cannot be made private once a member opens it.
+      ios: ios ? {
+        version: ios.version,
+        buildNumber: ios.buildNumber,
+        releaseNotes: ios.releaseNotes,
+        updatedAt: ios.updatedAt,
+        externalUrl: ios.externalUrl,
+      } : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/mobile-app/android/download', requireVolunteer, volunteerActionLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await loadSessionContext(req);
+    const release = await getActiveMobileAppRelease('android');
+    if (!release?.fileUrl) throw new AppError(404, ErrorCode.NOT_FOUND, 'No active Android app release is available.');
+    if (/^https?:\/\//i.test(release.fileUrl) || release.fileUrl.startsWith('/uploads/')) {
+      throw new AppError(409, ErrorCode.NOT_FOUND, 'This legacy app release must be re-uploaded before it can be downloaded securely.');
+    }
+    if (!isPrivateObjectStorageConfigured()) {
+      throw new AppError(503, ErrorCode.INTERNAL_ERROR, 'Private app-download storage is not configured. Contact the campaign administrator.');
+    }
+
+    const object = await getPrivateObject(release.fileUrl);
+    const filename = `ikm-campaign-team-${release.version.replace(/[^a-zA-Z0-9._-]/g, '_')}.apk`;
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+
+    const body: any = object.body;
+    if (typeof body.pipe === 'function') {
+      body.once('error', next);
+      body.pipe(res);
+      return;
+    }
+    const bytes = await body.transformToByteArray();
+    return res.send(Buffer.from(bytes));
   } catch (err) {
     next(err);
   }

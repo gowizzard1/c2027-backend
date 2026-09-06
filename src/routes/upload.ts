@@ -4,7 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import { requireAdmin } from '../middleware/auth';
-import { isObjectStorageConfigured, putObject } from '../services/storage';
+import { isObjectStorageConfigured, isPrivateObjectStorageConfigured, putObject, putPrivateObject } from '../services/storage';
 import logger from '../lib/logger';
 
 const router = Router();
@@ -116,15 +116,13 @@ router.post(
   },
 );
 
-async function storePublicApk(file: Express.Multer.File) {
-  const filename = `mobile-apps/ikm-campaign-team-${crypto.randomUUID()}.apk`;
-  if (isObjectStorageConfigured()) {
-    return putObject(filename, file.buffer, 'application/vnd.android.package-archive');
+async function storePrivateApk(file: Express.Multer.File) {
+  if (!isPrivateObjectStorageConfigured()) {
+    throw new Error('Private app-download storage is not configured. Configure PRIVATE_S3_BUCKET and S3 credentials before publishing APK releases.');
   }
-  const localPath = path.join(UPLOADS_DIR, filename);
-  await fs.mkdir(path.dirname(localPath), { recursive: true });
-  await fs.writeFile(localPath, file.buffer);
-  return `/uploads/${filename}`;
+  const objectKey = `private/mobile-apps/ikm-campaign-team-${crypto.randomUUID()}.apk`;
+  await putPrivateObject(objectKey, file.buffer, 'application/vnd.android.package-archive');
+  return objectKey;
 }
 
 router.post(
@@ -134,11 +132,11 @@ router.post(
   async (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ error: 'NO_FILE', message: 'No APK uploaded.' });
     try {
-      const url = await storePublicApk(req.file);
-      return res.status(201).json({ url, size: req.file.size, originalName: req.file.originalname });
-    } catch (err) {
-      logger.error({ err }, 'Failed to store mobile APK');
-      return res.status(500).json({ error: 'STORAGE_ERROR', message: 'Could not save the APK. Configure durable public storage for production releases.' });
+      const objectKey = await storePrivateApk(req.file);
+      return res.status(201).json({ objectKey, size: req.file.size, originalName: req.file.originalname });
+    } catch (err: any) {
+      logger.error({ err }, 'Failed to store private mobile APK');
+      return res.status(500).json({ error: 'STORAGE_ERROR', message: err?.message || 'Could not save the private APK. Please try again.' });
     }
   },
 );

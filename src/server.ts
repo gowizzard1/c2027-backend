@@ -56,6 +56,9 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use('/api/', generalLimiter);
 
 // ── Static files ─────────────────────────────────────────────────────
+// APK releases are never served from the public uploads path. Current releases
+// are stored privately and require a Campaign Team Bearer session to download.
+app.use('/uploads/mobile-apps', (_req, res) => res.status(404).end());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
   maxAge: '1d',
   etag: true,

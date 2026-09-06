@@ -347,13 +347,16 @@ model PollingResultAttachment {
   @@index([reportId])
 }
 
-// Admin-published mobile application releases. Android APK files are public campaign app downloads.
+// Admin-published mobile application releases. Android APK artifacts are private
+// and only streamed after Campaign Team session validation.
 model MobileAppRelease {
   id           String   @id @default(cuid())
   platform     String   @default("android") // android | ios
   version      String
   buildNumber  String?
+  // Private object key for Android APKs. Retained field name avoids a data migration.
   fileUrl      String?
+  // Login-protected metadata may expose this third-party iOS destination.
   externalUrl  String?
   releaseNotes String?
   active       Boolean  @default(false)
