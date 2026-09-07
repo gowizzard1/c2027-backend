@@ -60,23 +60,33 @@ interface SendArgs {
   html?: string;
 }
 
-async function sendEmail({ to, subject, text, html }: SendArgs) {
+export type EmailSendOutcome = {
+  status: 'accepted' | 'not_configured' | 'failed';
+  providerMessageId?: string;
+  failureReason?: string;
+};
+
+async function sendEmailDetailed({ to, subject, text, html }: SendArgs): Promise<EmailSendOutcome> {
   if (!isEmailConfigured()) {
     logger.warn({ to, subject }, '[Email MOCK] SMTP not configured — email not sent');
     console.log(`[Email MOCK] To: ${to}\nSubject: ${subject}\n${text}`);
-    return false;
+    return { status: 'not_configured', failureReason: 'Email delivery is not configured.' };
   }
   try {
     const smtp = await getTransport();
-    await smtp.sendMail({ from: fromAddress(), to, subject, text, html });
-    logger.info({ to, subject }, 'Email sent');
-    return true;
+    const result = await smtp.sendMail({ from: fromAddress(), to, subject, text, html });
+    logger.info({ to, subject, messageId: result.messageId }, 'Email accepted by SMTP provider');
+    return { status: 'accepted', providerMessageId: result.messageId };
   } catch (err) {
     // Do not reuse a failed connection/client on the next approval attempt.
     transporter = null;
     logger.error({ err, to }, 'Email send failed');
-    return false;
+    return { status: 'failed', failureReason: 'The email provider did not accept this message.' };
   }
+}
+
+async function sendEmail(args: SendArgs): Promise<boolean> {
+  return (await sendEmailDetailed(args)).status === 'accepted';
 }
 
 /**
@@ -126,4 +136,65 @@ Together we rise! 🇰🇪
 </div>`;
 
   return sendEmail({ to, subject: "You're approved — activate your Maiywa 4 Turbo 2027 volunteer account", text, html });
+}
+
+export type PledgeEmailKind = 'thank_you' | 'donations_ready';
+
+export function pledgeEmailSubject(kind: PledgeEmailKind): string {
+  return kind === 'thank_you'
+    ? 'Thank you for your pledge to Maiywa 4 Turbo 2027'
+    : 'Donations are now ready — support Maiywa 4 Turbo 2027';
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  }[character] || character));
+}
+
+/**
+ * Send one server-owned pledge message. The caller cannot supply arbitrary HTML,
+ * recipients, or subjects, so the admin interface cannot become a mail relay.
+ */
+export async function sendPledgeEmail(params: {
+  to: string;
+  name: string;
+  kind: PledgeEmailKind;
+  donationUrl: string;
+}): Promise<EmailSendOutcome & { subject: string }> {
+  const firstName = params.name.trim().split(/\s+/)[0] || 'Supporter';
+  const subject = pledgeEmailSubject(params.kind);
+  const safeName = escapeHtml(firstName);
+  const safeDonationUrl = escapeHtml(params.donationUrl);
+
+  if (params.kind === 'thank_you') {
+    const text = `Hi ${firstName},
+
+Thank you for pledging your support to Maiywa 4 Turbo 2027. Your commitment means a great deal to our campaign and the communities we serve.
+
+No payment has been taken. We will email you when donations are ready.
+
+Together we rise! 🇰🇪
+— Maiywa 4 Turbo 2027`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0D0D0D"><div style="background:#0D0D0D;padding:20px;border-radius:12px 12px 0 0"><h2 style="color:#F5C100;margin:0">Maiywa 4 Turbo 2027</h2></div><div style="border:1px solid #eee;border-top:none;padding:24px;border-radius:0 0 12px 12px"><p>Hi ${safeName},</p><p>Thank you for pledging your support to <strong>Maiywa 4 Turbo 2027</strong>. Your commitment means a great deal to our campaign and the communities we serve.</p><p>No payment has been taken. We will email you when donations are ready.</p><p style="margin-top:24px">Together we rise! 🇰🇪<br>— Maiywa 4 Turbo 2027</p></div></div>`;
+    return { ...(await sendEmailDetailed({ to: params.to, subject, text, html })), subject };
+  }
+
+  const text = `Hi ${firstName},
+
+Thank you again for pledging your support to Maiywa 4 Turbo 2027.
+
+Donations are now ready. If you would like to support the campaign, please use our official donation page:
+${params.donationUrl}
+
+Thank you for standing with us.
+
+Together we rise! 🇰🇪
+— Maiywa 4 Turbo 2027`;
+  const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0D0D0D"><div style="background:#0D0D0D;padding:20px;border-radius:12px 12px 0 0"><h2 style="color:#F5C100;margin:0">Maiywa 4 Turbo 2027</h2></div><div style="border:1px solid #eee;border-top:none;padding:24px;border-radius:0 0 12px 12px"><p>Hi ${safeName},</p><p>Thank you again for pledging your support to <strong>Maiywa 4 Turbo 2027</strong>.</p><p>Donations are now ready. If you would like to support the campaign, please use our official donation page:</p><p><a href="${safeDonationUrl}" style="display:inline-block;background:#1A7A3C;color:#fff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:8px">Donate to the campaign</a></p><p style="font-size:12px;color:#666">Or paste this link: ${safeDonationUrl}</p><p>Thank you for standing with us.</p><p style="margin-top:24px">Together we rise! 🇰🇪<br>— Maiywa 4 Turbo 2027</p></div></div>`;
+  return { ...(await sendEmailDetailed({ to: params.to, subject, text, html })), subject };
 }

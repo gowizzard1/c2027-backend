@@ -510,9 +510,44 @@ export async function addPledge(data: {
 export async function getPledges(options: PaginationOptions = {}) {
   const { page = 1, limit = 50 } = options;
   return prisma.pledge.findMany({
+    include: {
+      emailDeliveries: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      },
+    },
     orderBy: { createdAt: 'desc' },
     skip: (page - 1) * limit,
     take: limit,
+  });
+}
+
+export async function getPledgesForEmail(ids: string[]) {
+  return prisma.pledge.findMany({
+    where: { id: { in: ids }, status: { not: 'archived' } },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+export async function createPledgeEmailDelivery(data: {
+  pledgeId: string;
+  kind: 'thank_you' | 'donations_ready';
+  recipientEmail: string;
+  subject: string;
+  initiatedBy: string;
+}) {
+  return prisma.pledgeEmailDelivery.create({ data });
+}
+
+export async function completePledgeEmailDelivery(id: string, outcome: { status: 'accepted' | 'failed'; providerMessageId?: string; failureReason?: string }) {
+  return prisma.pledgeEmailDelivery.update({
+    where: { id },
+    data: {
+      status: outcome.status,
+      providerMessageId: outcome.providerMessageId || null,
+      failureReason: outcome.failureReason?.slice(0, 500) || null,
+      completedAt: new Date(),
+    },
   });
 }
 

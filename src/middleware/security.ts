@@ -88,6 +88,20 @@ export const resultUploadLimiter = rateLimit({
   message: { error: 'RATE_LIMITED', message: 'Too many result upload attempts. Please wait before trying again.' },
 });
 
+function adminKey(req: Request) {
+  return `admin:${(req as any).user?.username || req.ip || 'missing'}`;
+}
+
+/** Email campaigns are intentionally bounded even for authenticated admins. */
+export const pledgeEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: adminKey,
+  message: { error: 'RATE_LIMITED', message: 'Too many pledge email campaigns. Please wait before sending another batch.' },
+});
+
 /** Administrative API is also rate-limited even after authentication. */
 export const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

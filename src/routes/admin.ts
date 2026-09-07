@@ -1,10 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAdmin, createSession } from '../middleware/auth';
-import { authLimiter, adminLimiter } from '../middleware/security';
+import { authLimiter, adminLimiter, pledgeEmailLimiter } from '../middleware/security';
 import {
   validate, loginSchema, newsSchema, productSchema,
-  manifestoSchema, settingsSchema,
+  manifestoSchema, settingsSchema, pledgeStatusSchema, pledgeEmailCampaignSchema,
 } from '../lib/validation';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
@@ -18,7 +18,8 @@ import {
   getManifesto, addManifestoItem, updateManifestoItem, deleteManifestoItem,
   getBiography, upsertBioSection,
   getPaymentMode, setPaymentMode,
-  getPledges, updatePledgeStatus, deletePledge,
+  getPledges, getPledgesForEmail, updatePledgeStatus, deletePledge,
+  createPledgeEmailDelivery, completePledgeEmailDelivery,
   getAnalyticsSummary,
   getStipendRequests, approveStipendRequest, rejectStipendRequest, markStipendRequestPaid,
   getMobilizerReports, updateMobilizerReportStatus,
@@ -36,7 +37,7 @@ import {
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
-import { sendVolunteerInvite } from '../services/email';
+import { sendVolunteerInvite, pledgeEmailSubject, sendPledgeEmail } from '../services/email';
 import { getPrivateObject } from '../services/storage';
 import { getVolunteerById } from '../store';
 import { env } from '../lib/env';
@@ -621,13 +622,68 @@ router.get('/pledges', requireAdmin, async (req: Request, res: Response, next: N
   }
 });
 
-router.patch('/pledges/:id', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/pledges/:id', requireAdmin, validate(pledgeStatusSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status } = req.body;
-    if (!status) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Status is required');
-    const pledge = await updatePledgeStatus(req.params.id, status);
+    const pledge = await updatePledgeStatus(req.params.id, req.body.status);
     if (!pledge) throw new AppError(404, ErrorCode.NOT_FOUND, 'Pledge not found');
     return res.json(pledge);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Explicit, selected-recipient pledge campaign. Templates, subjects, and the
+ * donation destination are server-owned so this endpoint cannot send arbitrary mail.
+ */
+router.post('/pledges/email-campaigns', requireAdmin, pledgeEmailLimiter, validate(pledgeEmailCampaignSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const pledgeIds = [...new Set(req.body.pledgeIds as string[])];
+    const pledges = await getPledgesForEmail(pledgeIds);
+    if (pledges.length !== pledgeIds.length) {
+      throw new AppError(404, ErrorCode.NOT_FOUND, 'One or more selected pledges are unavailable or archived. Refresh and try again.');
+    }
+
+    const kind = req.body.kind;
+    const initiatedBy = (req as any).user.username as string;
+    const donationUrl = `${env().FRONTEND_URL.replace(/\/+$/, '')}/donate`;
+    const deliveries: any[] = [];
+
+    // Send sequentially to avoid an uncontrolled SMTP burst. The validation
+    // schema intentionally caps a campaign to 25 selected pledges.
+    for (const pledge of pledges) {
+      const delivery = await createPledgeEmailDelivery({
+        pledgeId: pledge.id,
+        kind,
+        recipientEmail: pledge.email,
+        subject: pledgeEmailSubject(kind),
+        initiatedBy,
+      });
+      try {
+        const outcome = await sendPledgeEmail({ to: pledge.email, name: pledge.name, kind, donationUrl });
+        const completed = await completePledgeEmailDelivery(delivery.id, {
+          status: outcome.status === 'accepted' ? 'accepted' : 'failed',
+          providerMessageId: outcome.providerMessageId,
+          failureReason: outcome.failureReason,
+        });
+        deliveries.push(completed);
+        if (outcome.status === 'accepted' && pledge.status === 'new') {
+          await updatePledgeStatus(pledge.id, 'contacted');
+        }
+      } catch (error) {
+        logger.error({ error, pledgeId: pledge.id, kind }, 'Pledge campaign email attempt failed');
+        const completed = await completePledgeEmailDelivery(delivery.id, {
+          status: 'failed',
+          failureReason: 'The email campaign could not be completed for this recipient.',
+        });
+        deliveries.push(completed);
+      }
+    }
+
+    const accepted = deliveries.filter(delivery => delivery.status === 'accepted').length;
+    const failed = deliveries.length - accepted;
+    logger.info({ initiatedBy, kind, selected: pledges.length, accepted, failed }, 'Pledge email campaign completed');
+    return res.json({ kind, selected: pledges.length, accepted, failed, deliveries });
   } catch (err) {
     next(err);
   }

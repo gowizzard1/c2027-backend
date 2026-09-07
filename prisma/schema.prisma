@@ -142,7 +142,8 @@ model Pledge {
   email     String
   phone     String
   amount    Float?
-  message   String?
+  message         String?
+  emailDeliveries PledgeEmailDelivery[]
   status    String   @default("new") // new | contacted | converted | archived
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -153,6 +154,27 @@ model Pledge {
 }
 
 
+
+// Immutable audit trail for administrator-triggered pledge communication.
+// `accepted` means the configured SMTP provider accepted the message, not that
+// the recipient mailbox confirmed delivery.
+model PledgeEmailDelivery {
+  id                String   @id @default(cuid())
+  pledgeId          String
+  pledge            Pledge   @relation(fields: [pledgeId], references: [id], onDelete: Restrict)
+  kind              String   // thank_you | donations_ready
+  status            String   @default("sending") // sending | accepted | failed
+  recipientEmail    String
+  subject           String
+  initiatedBy       String
+  providerMessageId String?
+  failureReason     String?
+  createdAt         DateTime @default(now())
+  completedAt       DateTime?
+
+  @@index([pledgeId, createdAt])
+  @@index([kind, status, createdAt])
+}
 
 // Privacy-conscious first-party site analytics. No IP address or raw user-agent is stored.
 model AnalyticsEvent {

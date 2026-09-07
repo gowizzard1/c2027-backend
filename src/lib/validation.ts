@@ -121,6 +121,15 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const pledgeStatusSchema = z.object({
+  status: z.enum(['new', 'contacted', 'converted', 'archived']),
+});
+
+export const pledgeEmailCampaignSchema = z.object({
+  kind: z.enum(['thank_you', 'donations_ready']),
+  pledgeIds: z.array(z.string().min(1)).min(1, 'Select at least one pledger.').max(25, 'You can email up to 25 pledgers at a time.'),
+});
+
 export const newsSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   content: z.string().max(10000).optional().default(''),
