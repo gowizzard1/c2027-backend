@@ -185,6 +185,7 @@ model OpinionPoll {
   description String?
   disclosure  String
   status      String   @default("draft") // draft | published | closed | archived
+  isDefault   Boolean  @default(false)
   currentVersion Int   @default(1)
   publishedAt DateTime?
   closedAt    DateTime?

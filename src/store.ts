@@ -1538,6 +1538,7 @@ async function publicPollDto(poll: any) {
     description: poll.description,
     disclosure: poll.disclosure,
     status: poll.status,
+    isDefault: poll.isDefault,
     version: poll.currentVersion,
     publishedAt: poll.publishedAt,
     closedAt: poll.closedAt,
@@ -1557,6 +1558,14 @@ export async function getPublicOpinionPolls() {
 export async function getPublicOpinionPoll(slug: string) {
   const poll = await prisma.opinionPoll.findFirst({
     where: { slug, status: { in: ['published', 'closed'] }, archivedAt: null },
+    include: { options: true },
+  });
+  return poll ? publicPollDto(poll) : null;
+}
+
+export async function getDefaultPublicOpinionPoll() {
+  const poll = await prisma.opinionPoll.findFirst({
+    where: { isDefault: true, status: { in: ['published', 'closed'] }, archivedAt: null },
     include: { options: true },
   });
   return poll ? publicPollDto(poll) : null;
@@ -1652,10 +1661,19 @@ export async function closeOpinionPoll(id: string) {
   return prisma.opinionPoll.update({ where: { id }, data: { status: 'closed', closedAt: new Date() } });
 }
 
+export async function setDefaultOpinionPoll(id: string) {
+  return prisma.$transaction(async tx => {
+    const poll = await tx.opinionPoll.findUnique({ where: { id } });
+    if (!poll || poll.archivedAt || !['published', 'closed'].includes(poll.status)) return null;
+    await tx.opinionPoll.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+    return tx.opinionPoll.update({ where: { id }, data: { isDefault: true } });
+  });
+}
+
 export async function archiveOpinionPoll(id: string) {
   const poll = await prisma.opinionPoll.findUnique({ where: { id } });
   if (!poll || poll.status === 'archived') return null;
-  return prisma.opinionPoll.update({ where: { id }, data: { status: 'archived', archivedAt: new Date() } });
+  return prisma.opinionPoll.update({ where: { id }, data: { status: 'archived', archivedAt: new Date(), isDefault: false } });
 }
 
 export async function resetOpinionPoll(id: string, note: string, resetBy: string) {
@@ -1667,7 +1685,7 @@ export async function resetOpinionPoll(id: string, note: string, resetBy: string
     await tx.opinionPollResetAudit.create({ data: { pollId: id, fromVersion: poll.currentVersion, toVersion, note, resetBy, voteCountBefore } });
     return tx.opinionPoll.update({
       where: { id },
-      data: { currentVersion: toVersion, status: 'draft', publishedAt: null, closedAt: null },
+      data: { currentVersion: toVersion, status: 'draft', publishedAt: null, closedAt: null, isDefault: false },
     });
   });
 }

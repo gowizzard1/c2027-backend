@@ -35,7 +35,7 @@ import {
   updateElectionCandidate,
   getMobileAppReleases, createMobileAppRelease, activateMobileAppRelease, archiveMobileAppRelease, deleteMobileAppRelease,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
-  getAdminOpinionPolls, createOpinionPoll, updateDraftOpinionPoll, publishOpinionPoll, closeOpinionPoll, archiveOpinionPoll, resetOpinionPoll,
+  getAdminOpinionPolls, createOpinionPoll, updateDraftOpinionPoll, publishOpinionPoll, closeOpinionPoll, archiveOpinionPoll, resetOpinionPoll, setDefaultOpinionPoll,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -452,6 +452,17 @@ router.post('/opinion-polls/:id/close', requireAdmin, async (req: Request, res: 
     const poll = await closeOpinionPoll(req.params.id);
     if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only published polls can be closed.');
     logger.info({ pollId: poll.id, closedBy: (req as any).user?.username }, 'Opinion poll closed');
+    return res.json(poll);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/opinion-polls/:id/default', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await setDefaultOpinionPoll(req.params.id);
+    if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only published or closed non-archived polls can be set as the default.');
+    logger.info({ pollId: poll.id, setBy: (req as any).user?.username }, 'Default opinion poll updated');
     return res.json(poll);
   } catch (err) {
     next(err);
