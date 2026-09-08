@@ -1495,7 +1495,11 @@ export async function deleteMobileAppRelease(id: string) {
 const DEFAULT_POLL_DISCLOSURE = 'This is an informal campaign opinion poll. Results reflect voluntary, browser-limited responses and are not a scientific sample, voter register, or official election result.';
 
 function hashPollBrowserToken(token: string) {
-  return crypto.createHmac('sha256', env().JWT_SECRET).update(token).digest('hex');
+  return crypto.createHmac('sha256', env().JWT_SECRET).update(`browser:${token}`).digest('hex');
+}
+
+function hashPollNetworkAddress(ip: string) {
+  return crypto.createHmac('sha256', env().JWT_SECRET).update(`network:${ip}`).digest('hex');
 }
 
 async function pollTotals(pollId: string, version: number, options: { id: string; candidateId: string | null; candidateNameSnapshot: string; candidatePartySnapshot: string | null; candidateImageUrlSnapshot: string | null; sortOrder: number }[]) {
@@ -1666,14 +1670,20 @@ export async function resetOpinionPoll(id: string, note: string, resetBy: string
   });
 }
 
-export async function castAnonymousOpinionPollVote(slug: string, optionId: string, browserToken: string) {
+export async function castAnonymousOpinionPollVote(slug: string, optionId: string, browserToken: string, requestIp: string) {
   const result = await prisma.$transaction(async tx => {
     const poll = await tx.opinionPoll.findFirst({ where: { slug, status: 'published', archivedAt: null }, include: { options: true } });
     if (!poll) return { state: 'unavailable' as const };
     if (!poll.options.some(option => option.id === optionId)) return { state: 'invalid_option' as const };
     try {
       await tx.opinionPollVote.create({
-        data: { pollId: poll.id, optionId, pollVersion: poll.currentVersion, browserTokenHash: hashPollBrowserToken(browserToken) },
+        data: {
+          pollId: poll.id,
+          optionId,
+          pollVersion: poll.currentVersion,
+          browserTokenHash: hashPollBrowserToken(browserToken),
+          networkHash: hashPollNetworkAddress(requestIp),
+        },
       });
       return { state: 'recorded' as const };
     } catch (error: any) {

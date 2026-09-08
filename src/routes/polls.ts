@@ -13,7 +13,8 @@ const router = Router();
 router.post('/:slug/votes', pollVoteLimiter, validate(opinionPollVoteSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = typeof req.params.slug === 'string' ? req.params.slug.trim() : '';
-    const result = await castAnonymousOpinionPollVote(slug, req.body.optionId, req.body.browserToken);
+    const requestIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const result = await castAnonymousOpinionPollVote(slug, req.body.optionId, req.body.browserToken, requestIp);
     if (result.state === 'unavailable') throw new AppError(404, ErrorCode.NOT_FOUND, 'This poll is not currently open for voting.');
     if (result.state === 'invalid_option') throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Choose an option from this poll.');
     if (result.state === 'duplicate') {

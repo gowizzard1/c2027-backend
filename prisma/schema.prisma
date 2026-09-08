@@ -227,9 +227,11 @@ model OpinionPollVote {
   option           OpinionPollOption @relation(fields: [optionId], references: [id], onDelete: Restrict)
   pollVersion      Int
   browserTokenHash String
+  networkHash      String?
   createdAt        DateTime @default(now())
 
   @@unique([pollId, pollVersion, browserTokenHash])
+  @@unique([pollId, pollVersion, networkHash])
   @@index([pollId, pollVersion])
   @@index([optionId, pollVersion])
 }
