@@ -1510,20 +1510,22 @@ async function pollTotals(pollId: string, version: number, options: { id: string
   });
   const counts = new Map(rows.map(row => [row.optionId, row._count._all]));
   const totalVotes = rows.reduce((sum, row) => sum + row._count._all, 0);
+  const rankedOptions = [...options].map(option => {
+    const votes = counts.get(option.id) || 0;
+    return {
+      id: option.id,
+      candidateId: option.candidateId,
+      name: option.candidateNameSnapshot,
+      party: option.candidatePartySnapshot,
+      imageUrl: option.candidateImageUrlSnapshot,
+      votes,
+      percentage: totalVotes ? Number(((votes / totalVotes) * 100).toFixed(1)) : 0,
+      sortOrder: option.sortOrder,
+    };
+  }).sort((a, b) => b.votes - a.votes || a.sortOrder - b.sortOrder);
   return {
     totalVotes,
-    options: options.sort((a, b) => a.sortOrder - b.sortOrder).map(option => {
-      const votes = counts.get(option.id) || 0;
-      return {
-        id: option.id,
-        candidateId: option.candidateId,
-        name: option.candidateNameSnapshot,
-        party: option.candidatePartySnapshot,
-        imageUrl: option.candidateImageUrlSnapshot,
-        votes,
-        percentage: totalVotes ? Number(((votes / totalVotes) * 100).toFixed(1)) : 0,
-      };
-    }),
+    options: rankedOptions.map(({ sortOrder: _sortOrder, ...option }) => option),
   };
 }
 
