@@ -1,6 +1,11 @@
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { Request, Response } from 'express';
+import { getOriginalClientIp } from '../lib/client-ip';
+
+function clientIpKey(req: Request) {
+  return `ip:${getOriginalClientIp(req)}`;
+}
 
 /**
  * Security headers via helmet.
@@ -18,6 +23,7 @@ export const generalLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' },
 });
 
@@ -30,6 +36,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipFailedRequests: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Too many login attempts. Please try again in 5 minutes.' },
 });
 
@@ -41,6 +48,7 @@ export const paymentLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Too many payment attempts. Please wait before trying again.' },
 });
 
@@ -50,6 +58,7 @@ export const registrationLimiter = rateLimit({
   max: 8,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Too many volunteer registrations from this network. Please try again later.' },
 });
 
@@ -59,6 +68,7 @@ export const analyticsLimiter = rateLimit({
   max: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Analytics request limit reached.' },
 });
 
@@ -68,6 +78,7 @@ export const pollVoteLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: req => `poll-network:${getOriginalClientIp(req)}`,
   message: { error: 'RATE_LIMITED', message: 'Too many vote attempts from this network. Please wait before trying again.' },
 });
 
@@ -98,7 +109,7 @@ export const resultUploadLimiter = rateLimit({
 });
 
 function adminKey(req: Request) {
-  return `admin:${(req as any).user?.username || req.ip || 'missing'}`;
+  return `admin:${(req as any).user?.username || clientIpKey(req)}`;
 }
 
 /** Email campaigns are intentionally bounded even for authenticated admins. */
@@ -117,6 +128,7 @@ export const adminLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: clientIpKey,
   message: { error: 'RATE_LIMITED', message: 'Too many administrative requests. Please wait before trying again.' },
 });
 
