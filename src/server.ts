@@ -46,7 +46,7 @@ app.use(cors({
   origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Poll-Browser-Token'],
 }));
 
 // ── Body parsing ─────────────────────────────────────────────────────

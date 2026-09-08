@@ -1,11 +1,25 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { opinionPollVoteSchema, validate } from '../lib/validation';
 import { pollVoteLimiter } from '../middleware/security';
-import { castAnonymousOpinionPollVote } from '../store';
+import { castAnonymousOpinionPollVote, getAnonymousOpinionPollVoteStatus } from '../store';
 import { AppError, ErrorCode } from '../lib/errors';
 import { getOriginalClientIp } from '../lib/client-ip';
 
 const router = Router();
+
+/** Returns current results plus whether this browser/network already voted. */
+router.get('/:slug/vote-status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const slug = typeof req.params.slug === 'string' ? req.params.slug.trim() : '';
+    const tokenHeader = req.headers['x-poll-browser-token'];
+    const browserToken = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
+    const result = await getAnonymousOpinionPollVoteStatus(slug, browserToken, getOriginalClientIp(req));
+    if (result.state === 'unavailable') throw new AppError(404, ErrorCode.NOT_FOUND, 'This poll is not available.');
+    return res.json({ hasVoted: result.hasVoted, poll: result.poll });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * Records one anonymous vote per browser token for the active poll round.

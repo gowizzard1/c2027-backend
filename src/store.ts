@@ -1670,6 +1670,24 @@ export async function resetOpinionPoll(id: string, note: string, resetBy: string
   });
 }
 
+export async function getAnonymousOpinionPollVoteStatus(slug: string, browserToken: string | undefined, requestIp: string) {
+  const record = await prisma.opinionPoll.findFirst({
+    where: { slug, status: { in: ['published', 'closed'] }, archivedAt: null },
+    select: { id: true, currentVersion: true },
+  });
+  if (!record) return { state: 'unavailable' as const, poll: null, hasVoted: false };
+
+  const voteConditions: any[] = [{ networkHash: hashPollNetworkAddress(requestIp) }];
+  if (browserToken && /^[A-Za-z0-9_-]{32,128}$/.test(browserToken)) {
+    voteConditions.push({ browserTokenHash: hashPollBrowserToken(browserToken) });
+  }
+  const priorVote = await prisma.opinionPollVote.findFirst({
+    where: { pollId: record.id, pollVersion: record.currentVersion, OR: voteConditions },
+    select: { id: true },
+  });
+  return { state: 'available' as const, poll: await getPublicOpinionPoll(slug), hasVoted: !!priorVote };
+}
+
 export async function castAnonymousOpinionPollVote(slug: string, optionId: string, browserToken: string, requestIp: string) {
   const result = await prisma.$transaction(async tx => {
     const poll = await tx.opinionPoll.findFirst({ where: { slug, status: 'published', archivedAt: null }, include: { options: true } });
