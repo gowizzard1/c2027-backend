@@ -1498,7 +1498,7 @@ function hashPollBrowserToken(token: string) {
   return crypto.createHmac('sha256', env().JWT_SECRET).update(token).digest('hex');
 }
 
-async function pollTotals(pollId: string, version: number, options: { id: string; label: string; sortOrder: number }[]) {
+async function pollTotals(pollId: string, version: number, options: { id: string; candidateId: string | null; candidateNameSnapshot: string; candidatePartySnapshot: string | null; candidateImageUrlSnapshot: string | null; sortOrder: number }[]) {
   const rows = await prisma.opinionPollVote.groupBy({
     by: ['optionId'],
     where: { pollId, pollVersion: version },
@@ -1510,7 +1510,15 @@ async function pollTotals(pollId: string, version: number, options: { id: string
     totalVotes,
     options: options.sort((a, b) => a.sortOrder - b.sortOrder).map(option => {
       const votes = counts.get(option.id) || 0;
-      return { id: option.id, label: option.label, votes, percentage: totalVotes ? Number(((votes / totalVotes) * 100).toFixed(1)) : 0 };
+      return {
+        id: option.id,
+        candidateId: option.candidateId,
+        name: option.candidateNameSnapshot,
+        party: option.candidatePartySnapshot,
+        imageUrl: option.candidateImageUrlSnapshot,
+        votes,
+        percentage: totalVotes ? Number(((votes / totalVotes) * 100).toFixed(1)) : 0,
+      };
     }),
   };
 }
@@ -1563,24 +1571,52 @@ export async function getAdminOpinionPolls(includeArchived = false) {
   })));
 }
 
-export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; options: string[] }) {
-  return prisma.opinionPoll.create({
-    data: {
-      title: data.title,
-      slug: data.slug,
-      prompt: data.prompt,
-      description: data.description || null,
-      disclosure: DEFAULT_POLL_DISCLOSURE,
-      options: { create: data.options.map((label, sortOrder) => ({ label, sortOrder })) },
-    },
-    include: { options: true, resets: true },
+async function resolveActivePollCandidates(tx: any, candidateIds: string[]) {
+  const candidates = await tx.electionCandidate.findMany({
+    where: { id: { in: candidateIds }, active: true, archivedAt: null },
+    select: { id: true, name: true, party: true, imageUrl: true },
+  });
+  if (candidates.length !== candidateIds.length) {
+    const error: any = new Error('Every selected poll candidate must be active and not archived.');
+    error.code = 'POLL_CANDIDATES_INVALID';
+    throw error;
+  }
+  const byId = new Map<string, { id: string; name: string; party: string | null; imageUrl: string | null }>(candidates.map((candidate: any) => [candidate.id, candidate]));
+  return candidateIds.map((candidateId, sortOrder) => {
+    const candidate = byId.get(candidateId);
+    if (!candidate) throw new Error('Selected poll candidate is unavailable.');
+    return {
+      candidateId: candidate.id,
+      candidateNameSnapshot: candidate.name,
+      candidatePartySnapshot: candidate.party,
+      candidateImageUrlSnapshot: candidate.imageUrl,
+      sortOrder,
+    };
   });
 }
 
-export async function updateDraftOpinionPoll(id: string, data: { title: string; slug: string; prompt: string; description?: string; options: string[] }) {
-  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
-  if (!poll || poll.status !== 'draft') return null;
+export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; candidateIds: string[] }) {
   return prisma.$transaction(async tx => {
+    const options = await resolveActivePollCandidates(tx, data.candidateIds);
+    return tx.opinionPoll.create({
+      data: {
+        title: data.title,
+        slug: data.slug,
+        prompt: data.prompt,
+        description: data.description || null,
+        disclosure: DEFAULT_POLL_DISCLOSURE,
+        options: { create: options },
+      },
+      include: { options: true, resets: true },
+    });
+  });
+}
+
+export async function updateDraftOpinionPoll(id: string, data: { title: string; slug: string; prompt: string; description?: string; candidateIds: string[] }) {
+  return prisma.$transaction(async tx => {
+    const poll = await tx.opinionPoll.findUnique({ where: { id } });
+    if (!poll || poll.status !== 'draft') return null;
+    const options = await resolveActivePollCandidates(tx, data.candidateIds);
     await tx.opinionPollOption.deleteMany({ where: { pollId: id } });
     return tx.opinionPoll.update({
       where: { id },
@@ -1589,7 +1625,7 @@ export async function updateDraftOpinionPoll(id: string, data: { title: string; 
         slug: data.slug,
         prompt: data.prompt,
         description: data.description || null,
-        options: { create: data.options.map((label, sortOrder) => ({ label, sortOrder })) },
+        options: { create: options },
       },
       include: { options: true, resets: true },
     });
@@ -1599,6 +1635,8 @@ export async function updateDraftOpinionPoll(id: string, data: { title: string; 
 export async function publishOpinionPoll(id: string) {
   const poll = await prisma.opinionPoll.findUnique({ where: { id } });
   if (!poll || poll.status !== 'draft') return null;
+  const candidateOptionCount = await prisma.opinionPollOption.count({ where: { pollId: id, candidateId: { not: null } } });
+  if (candidateOptionCount < 2) return null;
   return prisma.opinionPoll.update({ where: { id }, data: { status: 'published', publishedAt: new Date(), closedAt: null } });
 }
 

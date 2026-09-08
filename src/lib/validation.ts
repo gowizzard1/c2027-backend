@@ -130,19 +130,17 @@ export const pledgeEmailCampaignSchema = z.object({
   pledgeIds: z.array(z.string().min(1)).min(1, 'Select at least one pledger.').max(25, 'You can email up to 25 pledgers at a time.'),
 });
 
-const pollOptionSchema = z.string().trim().min(1, 'Option text is required.').max(160, 'Option text must be 160 characters or fewer.');
 const pollFieldsSchema = z.object({
   title: z.string().trim().min(3, 'Title must be at least 3 characters.').max(200),
   slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers, and hyphens only.').min(3).max(100),
   prompt: z.string().trim().min(3, 'Question must be at least 3 characters.').max(500),
   description: z.string().trim().max(2000).optional().default(''),
-  options: z.array(pollOptionSchema).min(2, 'Add at least two options.').max(10, 'Use no more than 10 options.')
-    .superRefine((options, context) => {
+  candidateIds: z.array(z.string().min(1).max(100)).min(2, 'Select at least two active candidates.').max(10, 'Use no more than 10 candidates.')
+    .superRefine((candidateIds, context) => {
       const seen = new Set<string>();
-      options.forEach((option, index) => {
-        const normalized = option.toLocaleLowerCase();
-        if (seen.has(normalized)) context.addIssue({ code: z.ZodIssueCode.custom, path: [index], message: 'Poll options must be unique.' });
-        seen.add(normalized);
+      candidateIds.forEach((candidateId, index) => {
+        if (seen.has(candidateId)) context.addIssue({ code: z.ZodIssueCode.custom, path: [index], message: 'A candidate can only appear once in a poll.' });
+        seen.add(candidateId);
       });
     }),
 }).strict();

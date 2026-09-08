@@ -199,17 +199,22 @@ model OpinionPoll {
 }
 
 model OpinionPollOption {
-  id        String   @id @default(cuid())
-  pollId    String
-  poll      OpinionPoll @relation(fields: [pollId], references: [id], onDelete: Restrict)
-  label     String
-  sortOrder Int
-  votes     OpinionPollVote[]
-  createdAt DateTime @default(now())
+  id                       String   @id @default(cuid())
+  pollId                   String
+  poll                     OpinionPoll @relation(fields: [pollId], references: [id], onDelete: Restrict)
+  candidateId              String?
+  candidate                ElectionCandidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  candidateNameSnapshot    String
+  candidatePartySnapshot   String?
+  candidateImageUrlSnapshot String?
+  sortOrder                Int
+  votes                    OpinionPollVote[]
+  createdAt                DateTime @default(now())
 
   @@unique([pollId, sortOrder])
-  @@unique([pollId, label])
+  @@unique([pollId, candidateId])
   @@index([pollId])
+  @@index([candidateId])
 }
 
 // A hashed browser token permits one vote per browser per poll round without
@@ -390,6 +395,7 @@ model ElectionCandidate {
   active    Boolean  @default(true)
   archivedAt DateTime?
   activeBeforeArchive Boolean?
+  opinionPollOptions OpinionPollOption[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -418,7 +418,8 @@ router.post('/opinion-polls', requireAdmin, validate(createOpinionPollSchema), a
     logger.info({ pollId: poll.id, createdBy: (req as any).user?.username }, 'Opinion poll created');
     return res.status(201).json(poll);
   } catch (err: any) {
-    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or option list conflicts with an existing poll.' });
+    if (err?.code === 'POLL_CANDIDATES_INVALID') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
+    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or candidate selection conflicts with an existing poll.' });
     next(err);
   }
 });
@@ -429,7 +430,8 @@ router.put('/opinion-polls/:id', requireAdmin, validate(updateOpinionPollSchema)
     if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only draft polls can be edited. Close and reset a live poll to begin a new audited round.');
     return res.json(poll);
   } catch (err: any) {
-    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or option list conflicts with an existing poll.' });
+    if (err?.code === 'POLL_CANDIDATES_INVALID') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
+    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or candidate selection conflicts with an existing poll.' });
     next(err);
   }
 });
