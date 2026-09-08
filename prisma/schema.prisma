@@ -176,6 +176,74 @@ model PledgeEmailDelivery {
   @@index([kind, status, createdAt])
 }
 
+// Public, informal campaign opinion polls. Votes are anonymous and browser-limited.
+model OpinionPoll {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  prompt      String
+  description String?
+  disclosure  String
+  status      String   @default("draft") // draft | published | closed | archived
+  currentVersion Int   @default(1)
+  publishedAt DateTime?
+  closedAt    DateTime?
+  archivedAt  DateTime?
+  options     OpinionPollOption[]
+  votes       OpinionPollVote[]
+  resets      OpinionPollResetAudit[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, publishedAt])
+}
+
+model OpinionPollOption {
+  id        String   @id @default(cuid())
+  pollId    String
+  poll      OpinionPoll @relation(fields: [pollId], references: [id], onDelete: Restrict)
+  label     String
+  sortOrder Int
+  votes     OpinionPollVote[]
+  createdAt DateTime @default(now())
+
+  @@unique([pollId, sortOrder])
+  @@unique([pollId, label])
+  @@index([pollId])
+}
+
+// A hashed browser token permits one vote per browser per poll round without
+// storing a raw token, IP address, user agent, or voter identity.
+model OpinionPollVote {
+  id               String   @id @default(cuid())
+  pollId           String
+  poll             OpinionPoll @relation(fields: [pollId], references: [id], onDelete: Restrict)
+  optionId         String
+  option           OpinionPollOption @relation(fields: [optionId], references: [id], onDelete: Restrict)
+  pollVersion      Int
+  browserTokenHash String
+  createdAt        DateTime @default(now())
+
+  @@unique([pollId, pollVersion, browserTokenHash])
+  @@index([pollId, pollVersion])
+  @@index([optionId, pollVersion])
+}
+
+// Resets never delete votes. They begin a disclosed new voting round.
+model OpinionPollResetAudit {
+  id               String   @id @default(cuid())
+  pollId           String
+  poll             OpinionPoll @relation(fields: [pollId], references: [id], onDelete: Restrict)
+  fromVersion      Int
+  toVersion        Int
+  note             String
+  resetBy          String
+  voteCountBefore  Int      @default(0)
+  createdAt        DateTime @default(now())
+
+  @@index([pollId, createdAt])
+}
+
 // Privacy-conscious first-party site analytics. No IP address or raw user-agent is stored.
 model AnalyticsEvent {
   id             String   @id @default(cuid())

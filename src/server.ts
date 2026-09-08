@@ -20,6 +20,7 @@ import adminRoutes from './routes/admin';
 import contentRoutes from './routes/content';
 import uploadRoutes from './routes/upload';
 import analyticsRoutes from './routes/analytics';
+import pollRoutes from './routes/polls';
 
 // ── Validate environment on startup ──────────────────────────────────
 validateEnv();
@@ -78,6 +79,7 @@ app.use('/api/mpesa', mpesaRoutes);
 app.use('/api/donations/progress', progressRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/polls', pollRoutes);
 
 // ── Admin routes ─────────────────────────────────────────────────────
 app.use('/api/admin', adminRoutes);

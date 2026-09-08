@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import prisma from './db';
 import logger from './lib/logger';
 import { TURBO_COUNTY, TURBO_CONSTITUENCY, isTurboWard } from './lib/polling';
+import { env } from './lib/env';
 
 // ---- Types (re-exported for route use) ----
 export type { Donation, Volunteer, Order, NewsItem, Product, Setting } from '@prisma/client';
@@ -1487,4 +1488,160 @@ export async function deleteMobileAppRelease(id: string) {
   } catch {
     return false;
   }
+}
+
+
+// ---- Public opinion polls ----
+const DEFAULT_POLL_DISCLOSURE = 'This is an informal campaign opinion poll. Results reflect voluntary, browser-limited responses and are not a scientific sample, voter register, or official election result.';
+
+function hashPollBrowserToken(token: string) {
+  return crypto.createHmac('sha256', env().JWT_SECRET).update(token).digest('hex');
+}
+
+async function pollTotals(pollId: string, version: number, options: { id: string; label: string; sortOrder: number }[]) {
+  const rows = await prisma.opinionPollVote.groupBy({
+    by: ['optionId'],
+    where: { pollId, pollVersion: version },
+    _count: { _all: true },
+  });
+  const counts = new Map(rows.map(row => [row.optionId, row._count._all]));
+  const totalVotes = rows.reduce((sum, row) => sum + row._count._all, 0);
+  return {
+    totalVotes,
+    options: options.sort((a, b) => a.sortOrder - b.sortOrder).map(option => {
+      const votes = counts.get(option.id) || 0;
+      return { id: option.id, label: option.label, votes, percentage: totalVotes ? Number(((votes / totalVotes) * 100).toFixed(1)) : 0 };
+    }),
+  };
+}
+
+async function publicPollDto(poll: any) {
+  const totals = await pollTotals(poll.id, poll.currentVersion, poll.options);
+  return {
+    slug: poll.slug,
+    title: poll.title,
+    prompt: poll.prompt,
+    description: poll.description,
+    disclosure: poll.disclosure,
+    status: poll.status,
+    version: poll.currentVersion,
+    publishedAt: poll.publishedAt,
+    closedAt: poll.closedAt,
+    ...totals,
+  };
+}
+
+export async function getPublicOpinionPolls() {
+  const polls = await prisma.opinionPoll.findMany({
+    where: { status: { in: ['published', 'closed'] }, archivedAt: null },
+    include: { options: true },
+    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+  });
+  return Promise.all(polls.map(publicPollDto));
+}
+
+export async function getPublicOpinionPoll(slug: string) {
+  const poll = await prisma.opinionPoll.findFirst({
+    where: { slug, status: { in: ['published', 'closed'] }, archivedAt: null },
+    include: { options: true },
+  });
+  return poll ? publicPollDto(poll) : null;
+}
+
+export async function getAdminOpinionPolls(includeArchived = false) {
+  const polls = await prisma.opinionPoll.findMany({
+    where: includeArchived ? {} : { archivedAt: null },
+    include: {
+      options: true,
+      resets: { orderBy: { createdAt: 'desc' } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  return Promise.all(polls.map(async poll => ({
+    ...poll,
+    currentTotals: await pollTotals(poll.id, poll.currentVersion, poll.options),
+  })));
+}
+
+export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; options: string[] }) {
+  return prisma.opinionPoll.create({
+    data: {
+      title: data.title,
+      slug: data.slug,
+      prompt: data.prompt,
+      description: data.description || null,
+      disclosure: DEFAULT_POLL_DISCLOSURE,
+      options: { create: data.options.map((label, sortOrder) => ({ label, sortOrder })) },
+    },
+    include: { options: true, resets: true },
+  });
+}
+
+export async function updateDraftOpinionPoll(id: string, data: { title: string; slug: string; prompt: string; description?: string; options: string[] }) {
+  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
+  if (!poll || poll.status !== 'draft') return null;
+  return prisma.$transaction(async tx => {
+    await tx.opinionPollOption.deleteMany({ where: { pollId: id } });
+    return tx.opinionPoll.update({
+      where: { id },
+      data: {
+        title: data.title,
+        slug: data.slug,
+        prompt: data.prompt,
+        description: data.description || null,
+        options: { create: data.options.map((label, sortOrder) => ({ label, sortOrder })) },
+      },
+      include: { options: true, resets: true },
+    });
+  });
+}
+
+export async function publishOpinionPoll(id: string) {
+  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
+  if (!poll || poll.status !== 'draft') return null;
+  return prisma.opinionPoll.update({ where: { id }, data: { status: 'published', publishedAt: new Date(), closedAt: null } });
+}
+
+export async function closeOpinionPoll(id: string) {
+  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
+  if (!poll || poll.status !== 'published') return null;
+  return prisma.opinionPoll.update({ where: { id }, data: { status: 'closed', closedAt: new Date() } });
+}
+
+export async function archiveOpinionPoll(id: string) {
+  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
+  if (!poll || poll.status === 'archived') return null;
+  return prisma.opinionPoll.update({ where: { id }, data: { status: 'archived', archivedAt: new Date() } });
+}
+
+export async function resetOpinionPoll(id: string, note: string, resetBy: string) {
+  return prisma.$transaction(async tx => {
+    const poll = await tx.opinionPoll.findUnique({ where: { id } });
+    if (!poll || poll.status !== 'closed') return null;
+    const voteCountBefore = await tx.opinionPollVote.count({ where: { pollId: id, pollVersion: poll.currentVersion } });
+    const toVersion = poll.currentVersion + 1;
+    await tx.opinionPollResetAudit.create({ data: { pollId: id, fromVersion: poll.currentVersion, toVersion, note, resetBy, voteCountBefore } });
+    return tx.opinionPoll.update({
+      where: { id },
+      data: { currentVersion: toVersion, status: 'draft', publishedAt: null, closedAt: null },
+    });
+  });
+}
+
+export async function castAnonymousOpinionPollVote(slug: string, optionId: string, browserToken: string) {
+  const result = await prisma.$transaction(async tx => {
+    const poll = await tx.opinionPoll.findFirst({ where: { slug, status: 'published', archivedAt: null }, include: { options: true } });
+    if (!poll) return { state: 'unavailable' as const };
+    if (!poll.options.some(option => option.id === optionId)) return { state: 'invalid_option' as const };
+    try {
+      await tx.opinionPollVote.create({
+        data: { pollId: poll.id, optionId, pollVersion: poll.currentVersion, browserTokenHash: hashPollBrowserToken(browserToken) },
+      });
+      return { state: 'recorded' as const };
+    } catch (error: any) {
+      if (error?.code === 'P2002') return { state: 'duplicate' as const };
+      throw error;
+    }
+  });
+  return { ...result, poll: result.state === 'unavailable' ? null : await getPublicOpinionPoll(slug) };
 }

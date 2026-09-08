@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults } from '../store';
+import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults, getPublicOpinionPolls } from '../store';
 
 const router = Router();
 
@@ -49,6 +49,14 @@ router.get('/biography', async (_req: Request, res: Response, next: NextFunction
 router.get('/payment-mode', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     return res.json({ mode: await getPaymentMode() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/polls', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getPublicOpinionPolls());
   } catch (err) {
     next(err);
   }

@@ -5,6 +5,7 @@ import { authLimiter, adminLimiter, pledgeEmailLimiter } from '../middleware/sec
 import {
   validate, loginSchema, newsSchema, productSchema,
   manifestoSchema, settingsSchema, pledgeStatusSchema, pledgeEmailCampaignSchema,
+  createOpinionPollSchema, updateOpinionPollSchema, opinionPollResetSchema,
 } from '../lib/validation';
 import { AppError, ErrorCode } from '../lib/errors';
 import logger from '../lib/logger';
@@ -34,6 +35,7 @@ import {
   updateElectionCandidate,
   getMobileAppReleases, createMobileAppRelease, activateMobileAppRelease, archiveMobileAppRelease, deleteMobileAppRelease,
   getPollingResultReports, getPollingResultAttachment, updatePollingResultStatus, archivePollingResultReport,
+  getAdminOpinionPolls, createOpinionPoll, updateDraftOpinionPoll, publishOpinionPoll, closeOpinionPoll, archiveOpinionPoll, resetOpinionPoll,
 } from '../store';
 import { isMpesaConfigured } from '../services/mpesa';
 import { isCardConfigured } from '../services/card';
@@ -396,6 +398,82 @@ router.get('/polling-results/:reportId/attachments/:attachmentId', requireAdmin,
     res.setHeader('Content-Disposition', `inline; filename="${attachment.originalName.replace(/[^a-zA-Z0-9._-]/g, '_')}"`);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.send(Buffer.from(bytes));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Public opinion poll administration ---
+router.get('/opinion-polls', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getAdminOpinionPolls(req.query.includeArchived === 'true'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/opinion-polls', requireAdmin, validate(createOpinionPollSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await createOpinionPoll(req.body);
+    logger.info({ pollId: poll.id, createdBy: (req as any).user?.username }, 'Opinion poll created');
+    return res.status(201).json(poll);
+  } catch (err: any) {
+    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or option list conflicts with an existing poll.' });
+    next(err);
+  }
+});
+
+router.put('/opinion-polls/:id', requireAdmin, validate(updateOpinionPollSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await updateDraftOpinionPoll(req.params.id, req.body);
+    if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only draft polls can be edited. Close and reset a live poll to begin a new audited round.');
+    return res.json(poll);
+  } catch (err: any) {
+    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or option list conflicts with an existing poll.' });
+    next(err);
+  }
+});
+
+router.post('/opinion-polls/:id/publish', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await publishOpinionPoll(req.params.id);
+    if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only draft polls can be published.');
+    logger.info({ pollId: poll.id, publishedBy: (req as any).user?.username }, 'Opinion poll published');
+    return res.json(poll);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/opinion-polls/:id/close', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await closeOpinionPoll(req.params.id);
+    if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only published polls can be closed.');
+    logger.info({ pollId: poll.id, closedBy: (req as any).user?.username }, 'Opinion poll closed');
+    return res.json(poll);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/opinion-polls/:id/archive', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const poll = await archiveOpinionPoll(req.params.id);
+    if (!poll) throw new AppError(404, ErrorCode.NOT_FOUND, 'Poll not found or already archived.');
+    logger.info({ pollId: poll.id, archivedBy: (req as any).user?.username }, 'Opinion poll archived');
+    return res.json(poll);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/opinion-polls/:id/reset', requireAdmin, validate(opinionPollResetSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const resetBy = (req as any).user?.username || 'admin';
+    const poll = await resetOpinionPoll(req.params.id, req.body.note, resetBy);
+    if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only closed polls can be reset into a new round.');
+    logger.info({ pollId: poll.id, resetBy }, 'Opinion poll reset into a new audited round');
+    return res.json(poll);
   } catch (err) {
     next(err);
   }

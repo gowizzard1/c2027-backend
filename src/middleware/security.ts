@@ -62,6 +62,15 @@ export const analyticsLimiter = rateLimit({
   message: { error: 'RATE_LIMITED', message: 'Analytics request limit reached.' },
 });
 
+/** Public poll writes are expensive and browser tokens can be rotated, so throttle by network. */
+export const pollVoteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'RATE_LIMITED', message: 'Too many vote attempts from this network. Please wait before trying again.' },
+});
+
 function volunteerAccountKey(req: Request) {
   // This limiter is always placed after requireVolunteer; account ID is the stable
   // authenticated identity and avoids shared-IP bypasses or IPv6 parsing concerns.
