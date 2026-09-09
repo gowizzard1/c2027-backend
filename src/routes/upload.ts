@@ -4,7 +4,8 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import { requireAdmin } from '../middleware/auth';
-import { isObjectStorageConfigured, isPrivateObjectStorageConfigured, putObject, putPrivateObject } from '../services/storage';
+import { isPrivateObjectStorageConfigured, putPrivateObject } from '../services/storage';
+import { getPublicUploadsDir } from '../lib/uploads';
 import logger from '../lib/logger';
 
 const router = Router();
@@ -12,7 +13,6 @@ const router = Router();
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_APK_BYTES = 120 * 1024 * 1024; // 120MB
-const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 // Keep the file in memory so we can push it to object storage or write to disk.
 const upload = multer({
@@ -71,10 +71,7 @@ function parseUpload(fieldName: string) {
 async function storePublicImage(file: Express.Multer.File, prefix: string) {
   const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
   const filename = `${prefix}-${crypto.randomUUID()}${ext}`;
-  if (isObjectStorageConfigured()) {
-    return putObject(filename, file.buffer, file.mimetype);
-  }
-  const localPath = path.join(UPLOADS_DIR, filename);
+  const localPath = path.join(getPublicUploadsDir(), filename);
   await fs.mkdir(path.dirname(localPath), { recursive: true });
   await fs.writeFile(localPath, file.buffer);
   return `/uploads/${filename}`;

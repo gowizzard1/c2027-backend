@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
+import { getPublicUploadsDir } from './lib/uploads';
 
 // Load .env before anything else
 dotenv.config();
@@ -63,7 +63,7 @@ app.use('/api/', generalLimiter);
 // APK releases are never served from the public uploads path. Current releases
 // are stored privately and require a Campaign Team Bearer session to download.
 app.use('/uploads/mobile-apps', (_req, res) => res.status(404).end());
-app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
+app.use('/uploads', express.static(getPublicUploadsDir(), {
   maxAge: '1d',
   etag: true,
 }));

@@ -1707,6 +1707,23 @@ export async function setDefaultOpinionPoll(id: string) {
   });
 }
 
+export async function refreshOpinionPollCandidateImages(id: string) {
+  const poll = await prisma.opinionPoll.findUnique({
+    where: { id },
+    include: { options: { include: { candidate: { select: { imageUrl: true } } } }, },
+  });
+  if (!poll) return null;
+
+  const updates = poll.options.filter(option => option.candidate && option.candidateImageUrlSnapshot !== option.candidate.imageUrl);
+  if (updates.length) {
+    await prisma.$transaction(updates.map(option => prisma.opinionPollOption.update({
+      where: { id: option.id },
+      data: { candidateImageUrlSnapshot: option.candidate!.imageUrl },
+    })));
+  }
+  return { pollId: poll.id, updatedImages: updates.length };
+}
+
 export async function archiveOpinionPoll(id: string) {
   const poll = await prisma.opinionPoll.findUnique({ where: { id } });
   if (!poll || poll.status === 'archived') return null;
