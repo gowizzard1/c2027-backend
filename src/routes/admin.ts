@@ -272,8 +272,9 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const party = typeof req.body?.party === 'string' ? req.body.party.trim() : '';
+    const race = typeof req.body?.race === 'string' ? req.body.race.trim() : '';
     const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
-    if (!name || name.length > 150 || party.length > 150 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
+    if (!name || !race || name.length > 150 || party.length > 150 || race.length > 120 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name and race are required and values must be concise.');
     if (imageUrl) {
       const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
       const isAbsoluteUrl = (() => {
@@ -288,7 +289,7 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
         throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL or uploaded candidate image path.');
       }
     }
-    return res.status(201).json(await addElectionCandidate({ name, party: party || undefined, imageUrl: imageUrl || undefined }));
+    return res.status(201).json(await addElectionCandidate({ name, party: party || undefined, race, imageUrl: imageUrl || undefined }));
   } catch (err) {
     next(err);
   }
@@ -298,14 +299,15 @@ router.put('/election-candidates/:id', requireAdmin, async (req: Request, res: R
   try {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const party = typeof req.body?.party === 'string' ? req.body.party.trim() : '';
+    const race = typeof req.body?.race === 'string' ? req.body.race.trim() : '';
     const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
-    if (!name || name.length > 150 || party.length > 150 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name is required and values must be concise.');
+    if (!name || !race || name.length > 150 || party.length > 150 || race.length > 120 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name and race are required and values must be concise.');
     if (imageUrl) {
       const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
       const isAbsoluteUrl = (() => { try { const url = new URL(imageUrl); return url.protocol === 'https:' || url.protocol === 'http:'; } catch { return false; } })();
       if (!isLocalCandidateUpload && !isAbsoluteUrl) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate image must be a valid URL or uploaded candidate image path.');
     }
-    const candidate = await updateElectionCandidate(req.params.id, { name, party: party || undefined, imageUrl: imageUrl || undefined });
+    const candidate = await updateElectionCandidate(req.params.id, { name, party: party || undefined, race, imageUrl: imageUrl || undefined });
     if (!candidate) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate not found or update conflicts with an existing candidate.');
     return res.json(candidate);
   } catch (err) {
@@ -418,7 +420,7 @@ router.post('/opinion-polls', requireAdmin, validate(createOpinionPollSchema), a
     logger.info({ pollId: poll.id, createdBy: (req as any).user?.username }, 'Opinion poll created');
     return res.status(201).json(poll);
   } catch (err: any) {
-    if (err?.code === 'POLL_CANDIDATES_INVALID') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
+    if (err?.code === 'POLL_CANDIDATES_INVALID' || err?.code === 'POLL_CANDIDATE_RACE_MISMATCH') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
     if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or candidate selection conflicts with an existing poll.' });
     next(err);
   }
@@ -430,7 +432,7 @@ router.put('/opinion-polls/:id', requireAdmin, validate(updateOpinionPollSchema)
     if (!poll) throw new AppError(409, ErrorCode.VALIDATION_ERROR, 'Only draft polls can be edited. Close and reset a live poll to begin a new audited round.');
     return res.json(poll);
   } catch (err: any) {
-    if (err?.code === 'POLL_CANDIDATES_INVALID') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
+    if (err?.code === 'POLL_CANDIDATES_INVALID' || err?.code === 'POLL_CANDIDATE_RACE_MISMATCH') return res.status(400).json({ error: ErrorCode.VALIDATION_ERROR, message: err.message });
     if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'That poll slug or candidate selection conflicts with an existing poll.' });
     next(err);
   }

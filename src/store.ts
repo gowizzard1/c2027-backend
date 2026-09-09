@@ -1187,16 +1187,19 @@ export async function updatePollingStationApproval(id: string, approvalStatus: '
 }
 
 // ---- Private polling-day result reporting ----
-export async function getElectionCandidates(includeInactive = false) {
+export async function getElectionCandidates(includeInactive = false, race?: string) {
   return prisma.electionCandidate.findMany({
-    where: includeInactive ? {} : { active: true, archivedAt: null },
-    orderBy: { name: 'asc' },
+    where: {
+      ...(includeInactive ? {} : { active: true, archivedAt: null }),
+      ...(race ? { race } : {}),
+    },
+    orderBy: [{ race: 'asc' }, { name: 'asc' }],
   });
 }
 
-export async function addElectionCandidate(data: { name: string; party?: string; imageUrl?: string }) {
+export async function addElectionCandidate(data: { name: string; party?: string; race: string; imageUrl?: string }) {
   return prisma.electionCandidate.create({
-    data: { name: data.name.trim(), party: data.party?.trim() || null, imageUrl: data.imageUrl?.trim() || null },
+    data: { name: data.name.trim(), party: data.party?.trim() || null, race: data.race.trim(), imageUrl: data.imageUrl?.trim() || null },
   });
 }
 
@@ -1427,11 +1430,11 @@ export async function deleteElectionCandidate(id: string) {
   }
 }
 
-export async function updateElectionCandidate(id: string, data: { name: string; party?: string; imageUrl?: string }) {
+export async function updateElectionCandidate(id: string, data: { name: string; party?: string; race: string; imageUrl?: string }) {
   try {
     return await prisma.electionCandidate.update({
       where: { id },
-      data: { name: data.name.trim(), party: data.party?.trim() || null, imageUrl: data.imageUrl?.trim() || null },
+      data: { name: data.name.trim(), party: data.party?.trim() || null, race: data.race.trim(), imageUrl: data.imageUrl?.trim() || null },
     });
   } catch {
     return null;
@@ -1538,6 +1541,7 @@ async function publicPollDto(poll: any) {
     description: poll.description,
     disclosure: poll.disclosure,
     status: poll.status,
+    race: poll.race,
     isDefault: poll.isDefault,
     version: poll.currentVersion,
     publishedAt: poll.publishedAt,
@@ -1588,16 +1592,23 @@ export async function getAdminOpinionPolls(includeArchived = false) {
 
 async function resolveActivePollCandidates(tx: any, candidateIds: string[]) {
   const candidates = await tx.electionCandidate.findMany({
-    where: { id: { in: candidateIds }, active: true, archivedAt: null },
-    select: { id: true, name: true, party: true, imageUrl: true },
+    where: { id: { in: candidateIds }, active: true, archivedAt: null, race: { not: 'Unassigned' } },
+    select: { id: true, name: true, party: true, race: true, imageUrl: true },
   });
   if (candidates.length !== candidateIds.length) {
-    const error: any = new Error('Every selected poll candidate must be active and not archived.');
+    const error: any = new Error('Every selected poll candidate must be active, assigned to a race, and not archived.');
     error.code = 'POLL_CANDIDATES_INVALID';
     throw error;
   }
-  const byId = new Map<string, { id: string; name: string; party: string | null; imageUrl: string | null }>(candidates.map((candidate: any) => [candidate.id, candidate]));
-  return candidateIds.map((candidateId, sortOrder) => {
+  const races = new Set(candidates.map((candidate: any) => candidate.race));
+  if (races.size !== 1) {
+    const error: any = new Error('A poll can only include candidates from one race.');
+    error.code = 'POLL_CANDIDATE_RACE_MISMATCH';
+    throw error;
+  }
+  const race = candidates[0].race;
+  const byId = new Map<string, { id: string; name: string; party: string | null; race: string; imageUrl: string | null }>(candidates.map((candidate: any) => [candidate.id, candidate]));
+  const options = candidateIds.map((candidateId, sortOrder) => {
     const candidate = byId.get(candidateId);
     if (!candidate) throw new Error('Selected poll candidate is unavailable.');
     return {
@@ -1608,19 +1619,21 @@ async function resolveActivePollCandidates(tx: any, candidateIds: string[]) {
       sortOrder,
     };
   });
+  return { race, options };
 }
 
 export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; candidateIds: string[] }) {
   return prisma.$transaction(async tx => {
-    const options = await resolveActivePollCandidates(tx, data.candidateIds);
+    const selection = await resolveActivePollCandidates(tx, data.candidateIds);
     return tx.opinionPoll.create({
       data: {
         title: data.title,
         slug: data.slug,
         prompt: data.prompt,
         description: data.description || null,
+        race: selection.race,
         disclosure: DEFAULT_POLL_DISCLOSURE,
-        options: { create: options },
+        options: { create: selection.options },
       },
       include: { options: true, resets: true },
     });
@@ -1631,7 +1644,7 @@ export async function updateDraftOpinionPoll(id: string, data: { title: string; 
   return prisma.$transaction(async tx => {
     const poll = await tx.opinionPoll.findUnique({ where: { id } });
     if (!poll || poll.status !== 'draft') return null;
-    const options = await resolveActivePollCandidates(tx, data.candidateIds);
+    const selection = await resolveActivePollCandidates(tx, data.candidateIds);
     await tx.opinionPollOption.deleteMany({ where: { pollId: id } });
     return tx.opinionPoll.update({
       where: { id },
@@ -1640,7 +1653,8 @@ export async function updateDraftOpinionPoll(id: string, data: { title: string; 
         slug: data.slug,
         prompt: data.prompt,
         description: data.description || null,
-        options: { create: options },
+        race: selection.race,
+        options: { create: selection.options },
       },
       include: { options: true, resets: true },
     });

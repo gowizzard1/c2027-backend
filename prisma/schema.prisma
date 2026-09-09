@@ -185,6 +185,7 @@ model OpinionPoll {
   description String?
   disclosure  String
   status      String   @default("draft") // draft | published | closed | archived
+  race        String   @default("Unassigned")
   isDefault   Boolean  @default(false)
   currentVersion Int   @default(1)
   publishedAt DateTime?
@@ -394,6 +395,7 @@ model ElectionCandidate {
   id        String   @id @default(cuid())
   name      String
   party     String?
+  race      String   @default("Unassigned")
   imageUrl  String?
   active    Boolean  @default(true)
   archivedAt DateTime?
@@ -403,6 +405,7 @@ model ElectionCandidate {
   updatedAt DateTime @updatedAt
 
   @@unique([name, party])
+  @@index([race, active])
   @@index([active, name])
 }
 

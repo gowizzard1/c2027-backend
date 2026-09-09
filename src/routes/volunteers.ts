@@ -31,6 +31,8 @@ const resultUpload = multer({
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)),
 });
 
+const TURBO_MP_RACE = 'MP — Turbo Constituency';
+
 const roleLabels: Record<string, string> = {
   polling_agent: 'Polling Agent',
   mobilizer: 'Mobilizer',
@@ -129,7 +131,7 @@ router.get('/polling-stations', async (_req: Request, res: Response, next: NextF
 /** Public active candidate registry used by the private polling-agent report form. */
 router.get('/election-candidates', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    return res.json(await getElectionCandidates());
+    return res.json(await getElectionCandidates(false, TURBO_MP_RACE));
   } catch (err) {
     next(err);
   }
@@ -338,7 +340,7 @@ router.post('/polling-result', requireVolunteer, resultUploadLimiter, (req: Requ
       return res.status(409).json({ error: 'RESULT_ALREADY_SUBMITTED', message: 'A result report has already been submitted for this polling assignment.' });
     }
 
-    const activeCandidates = await getElectionCandidates();
+    const activeCandidates = await getElectionCandidates(false, TURBO_MP_RACE);
     if (activeCandidates.length === 0) return res.status(503).json({ error: 'CANDIDATES_NOT_CONFIGURED', message: 'The candidate list has not been configured by the campaign administrator.' });
     const rawVotes = typeof req.body?.candidateVotes === 'string' ? req.body.candidateVotes : '';
     let submittedVotes: { candidateId: string; votes: number }[];
