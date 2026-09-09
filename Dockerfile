@@ -22,7 +22,9 @@ FROM node:20-alpine AS production
 WORKDIR /app
 
 # OpenSSL is required by the Prisma query engine at runtime on Alpine.
-RUN apk add --no-cache openssl
+# su-exec lets the startup entrypoint prepare a root-owned Railway volume,
+# then drop back to the non-root application user.
+RUN apk add --no-cache openssl su-exec
 
 # Security: run as non-root user
 RUN addgroup -g 1001 appgroup && adduser -u 1001 -G appgroup -D appuser
@@ -35,14 +37,18 @@ RUN npx prisma generate
 
 COPY --from=builder /app/dist ./dist/
 
-# Create uploads directory (mount a persistent volume here in production)
+# Create uploads directory for local/container fallback. A Railway persistent
+# volume may replace this at runtime; docker-entrypoint.sh fixes its ownership.
 RUN mkdir -p uploads
 
 # Give the non-root user ownership of the whole app dir so Prisma can read its
 # engines (and write if it ever needs to) at runtime.
 RUN chown -R appuser:appgroup /app
 
-USER appuser
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
+RUN chmod +x /usr/local/bin/docker-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
 
 EXPOSE 5001
 
