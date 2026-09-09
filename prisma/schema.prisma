@@ -189,7 +189,10 @@ model OpinionPoll {
   isDefault   Boolean  @default(false)
   currentVersion Int   @default(1)
   publishedAt DateTime?
+  closesAt    DateTime?
   closedAt    DateTime?
+  closedBy    String?
+  resultsNewsId String? @unique
   archivedAt  DateTime?
   options     OpinionPollOption[]
   votes       OpinionPollVote[]

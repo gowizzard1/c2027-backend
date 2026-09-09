@@ -135,6 +135,7 @@ const pollFieldsSchema = z.object({
   slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Use lowercase letters, numbers, and hyphens only.').min(3).max(100),
   prompt: z.string().trim().min(3, 'Question must be at least 3 characters.').max(500),
   description: z.string().trim().max(2000).optional().default(''),
+  closesAt: z.union([z.literal(''), z.string().datetime({ offset: true })]).optional().transform(value => value || undefined),
   candidateIds: z.array(z.string().min(1).max(100)).min(2, 'Select at least two active candidates.').max(10, 'Use no more than 10 candidates.')
     .superRefine((candidateIds, context) => {
       const seen = new Set<string>();

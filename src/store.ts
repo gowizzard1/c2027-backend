@@ -1568,6 +1568,7 @@ async function publicPollDto(poll: any) {
     isDefault: poll.isDefault,
     version: poll.currentVersion,
     publishedAt: poll.publishedAt,
+    closesAt: poll.closesAt,
     closedAt: poll.closedAt,
     ...totals,
   };
@@ -1645,15 +1646,22 @@ async function resolveActivePollCandidates(tx: any, candidateIds: string[]) {
   return { race, options };
 }
 
-export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; candidateIds: string[] }) {
+export async function createOpinionPoll(data: { title: string; slug: string; prompt: string; description?: string; closesAt?: string; candidateIds: string[] }) {
   return prisma.$transaction(async tx => {
     const selection = await resolveActivePollCandidates(tx, data.candidateIds);
+    const closesAt = data.closesAt ? new Date(data.closesAt) : null;
+    if (closesAt && closesAt <= new Date()) {
+      const error: any = new Error('Closing date and time must be in the future.');
+      error.code = 'POLL_CLOSE_TIME_INVALID';
+      throw error;
+    }
     return tx.opinionPoll.create({
       data: {
         title: data.title,
         slug: data.slug,
         prompt: data.prompt,
         description: data.description || null,
+        closesAt,
         race: selection.race,
         disclosure: DEFAULT_POLL_DISCLOSURE,
         options: { create: selection.options },
@@ -1663,11 +1671,17 @@ export async function createOpinionPoll(data: { title: string; slug: string; pro
   });
 }
 
-export async function updateDraftOpinionPoll(id: string, data: { title: string; slug: string; prompt: string; description?: string; candidateIds: string[] }) {
+export async function updateDraftOpinionPoll(id: string, data: { title: string; slug: string; prompt: string; description?: string; closesAt?: string; candidateIds: string[] }) {
   return prisma.$transaction(async tx => {
     const poll = await tx.opinionPoll.findUnique({ where: { id } });
     if (!poll || poll.status !== 'draft') return null;
     const selection = await resolveActivePollCandidates(tx, data.candidateIds);
+    const closesAt = data.closesAt ? new Date(data.closesAt) : null;
+    if (closesAt && closesAt <= new Date()) {
+      const error: any = new Error('Closing date and time must be in the future.');
+      error.code = 'POLL_CLOSE_TIME_INVALID';
+      throw error;
+    }
     await tx.opinionPollOption.deleteMany({ where: { pollId: id } });
     return tx.opinionPoll.update({
       where: { id },
@@ -1676,6 +1690,7 @@ export async function updateDraftOpinionPoll(id: string, data: { title: string; 
         slug: data.slug,
         prompt: data.prompt,
         description: data.description || null,
+        closesAt,
         race: selection.race,
         options: { create: selection.options },
       },
@@ -1692,10 +1707,56 @@ export async function publishOpinionPoll(id: string) {
   return prisma.opinionPoll.update({ where: { id }, data: { status: 'published', publishedAt: new Date(), closedAt: null } });
 }
 
-export async function closeOpinionPoll(id: string) {
-  const poll = await prisma.opinionPoll.findUnique({ where: { id } });
-  if (!poll || poll.status !== 'published') return null;
-  return prisma.opinionPoll.update({ where: { id }, data: { status: 'closed', closedAt: new Date() } });
+function formatPollResultsNews(poll: any, options: any[], totals: Map<string, number>) {
+  const totalVotes = [...totals.values()].reduce((sum, votes) => sum + votes, 0);
+  const rankings = [...options].sort((a, b) => (totals.get(b.id) || 0) - (totals.get(a.id) || 0) || a.sortOrder - b.sortOrder)
+    .map((option, index) => {
+      const votes = totals.get(option.id) || 0;
+      const percentage = totalVotes ? ((votes / totalVotes) * 100).toFixed(1) : '0.0';
+      return `${index + 1}. ${option.candidateNameSnapshot}${option.candidatePartySnapshot ? ` (${option.candidatePartySnapshot})` : ''} — ${votes} vote${votes === 1 ? '' : 's'} (${percentage}%)`;
+    });
+  return `Final results for the opinion poll: ${poll.title}.\n\n${rankings.join('\n')}\n\nTotal responses: ${totalVotes}.\n\n${poll.disclosure}`;
+}
+
+/** Close one published poll and create exactly one News statement with final totals. */
+export async function finalizeOpinionPollClose(id: string, closedBy: string) {
+  return prisma.$transaction(async tx => {
+    const poll = await tx.opinionPoll.findUnique({ where: { id }, include: { options: true } });
+    if (!poll || poll.status !== 'published') return null;
+    const rows = await tx.opinionPollVote.groupBy({ by: ['optionId'], where: { pollId: id, pollVersion: poll.currentVersion }, _count: { _all: true } });
+    const totals = new Map(rows.map(row => [row.optionId, row._count._all]));
+    const news = await tx.newsItem.create({
+      data: {
+        id: crypto.randomUUID(),
+        title: `Final opinion poll results: ${poll.title}`,
+        content: formatPollResultsNews(poll, poll.options, totals),
+        date: new Date().toISOString().slice(0, 10),
+        category: 'Opinion Poll Results',
+        type: 'statement',
+        emoji: '📊',
+      },
+    });
+    return tx.opinionPoll.update({
+      where: { id },
+      data: { status: 'closed', closedAt: new Date(), closedBy, resultsNewsId: news.id },
+    });
+  });
+}
+
+export async function closeDueOpinionPolls() {
+  const due = await prisma.opinionPoll.findMany({
+    where: { status: 'published', closesAt: { not: null, lte: new Date() } },
+    select: { id: true },
+  });
+  let closed = 0;
+  for (const poll of due) {
+    if (await finalizeOpinionPollClose(poll.id, 'automatic scheduled close')) closed++;
+  }
+  return closed;
+}
+
+export async function closeOpinionPoll(id: string, closedBy: string) {
+  return finalizeOpinionPollClose(id, closedBy);
 }
 
 export async function setDefaultOpinionPoll(id: string) {
@@ -1739,7 +1800,7 @@ export async function resetOpinionPoll(id: string, note: string, resetBy: string
     await tx.opinionPollResetAudit.create({ data: { pollId: id, fromVersion: poll.currentVersion, toVersion, note, resetBy, voteCountBefore } });
     return tx.opinionPoll.update({
       where: { id },
-      data: { currentVersion: toVersion, status: 'draft', publishedAt: null, closedAt: null, isDefault: false },
+      data: { currentVersion: toVersion, status: 'draft', publishedAt: null, closesAt: null, closedAt: null, closedBy: null, resultsNewsId: null, isDefault: false },
     });
   });
 }

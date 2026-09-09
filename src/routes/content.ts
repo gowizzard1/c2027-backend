@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults, getPublicOpinionPolls, getPublicOpinionPoll, getDefaultPublicOpinionPoll } from '../store';
+import { getNews, getProducts, getSettings, getManifesto, getBiography, getPaymentMode, getPublicVerifiedPollingResults, getPublicOpinionPolls, getPublicOpinionPoll, getDefaultPublicOpinionPoll, closeDueOpinionPolls } from '../store';
 
 const router = Router();
 
@@ -56,6 +56,7 @@ router.get('/payment-mode', async (_req: Request, res: Response, next: NextFunct
 
 router.get('/polls', async (_req: Request, res: Response, next: NextFunction) => {
   try {
+    await closeDueOpinionPolls();
     return res.json(await getPublicOpinionPolls());
   } catch (err) {
     next(err);
@@ -64,6 +65,7 @@ router.get('/polls', async (_req: Request, res: Response, next: NextFunction) =>
 
 router.get('/polls/default', async (_req: Request, res: Response, next: NextFunction) => {
   try {
+    await closeDueOpinionPolls();
     const poll = await getDefaultPublicOpinionPoll();
     if (!poll) return res.status(404).json({ error: 'NOT_FOUND', message: 'No default poll is currently selected.' });
     return res.json(poll);
@@ -74,6 +76,7 @@ router.get('/polls/default', async (_req: Request, res: Response, next: NextFunc
 
 router.get('/polls/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await closeDueOpinionPolls();
     const poll = await getPublicOpinionPoll(req.params.slug);
     if (!poll) return res.status(404).json({ error: 'NOT_FOUND', message: 'Poll not found.' });
     return res.json(poll);

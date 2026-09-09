@@ -21,6 +21,7 @@ import contentRoutes from './routes/content';
 import uploadRoutes from './routes/upload';
 import analyticsRoutes from './routes/analytics';
 import pollRoutes from './routes/polls';
+import { closeDueOpinionPolls } from './store';
 
 // ── Validate environment on startup ──────────────────────────────────
 validateEnv();
@@ -110,6 +111,14 @@ app.use(errorHandler);
 // ── Start server ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
   logger.info({ port: PORT, env: env().NODE_ENV }, '🚀 Campaign backend running');
+  closeDueOpinionPolls().catch(error => logger.error({ error }, 'Initial scheduled opinion-poll close check failed'));
 });
+
+// Poll reads also check expiry, but this timer closes due polls and publishes
+// results even when no public visitor is loading a poll page.
+const pollCloseTimer = setInterval(() => {
+  closeDueOpinionPolls().catch(error => logger.error({ error }, 'Scheduled opinion-poll close check failed'));
+}, 60_000);
+pollCloseTimer.unref();
 
 export default app;

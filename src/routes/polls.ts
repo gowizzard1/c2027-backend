@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { opinionPollVoteSchema, validate } from '../lib/validation';
 import { pollVoteLimiter } from '../middleware/security';
-import { castAnonymousOpinionPollVote, getAnonymousOpinionPollVoteStatus } from '../store';
+import { castAnonymousOpinionPollVote, getAnonymousOpinionPollVoteStatus, closeDueOpinionPolls } from '../store';
 import { AppError, ErrorCode } from '../lib/errors';
 import { getOriginalClientIp } from '../lib/client-ip';
 
@@ -10,6 +10,7 @@ const router = Router();
 /** Returns current results plus whether this browser/network already voted. */
 router.get('/:slug/vote-status', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await closeDueOpinionPolls();
     const slug = typeof req.params.slug === 'string' ? req.params.slug.trim() : '';
     const tokenHeader = req.headers['x-poll-browser-token'];
     const browserToken = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
@@ -27,6 +28,7 @@ router.get('/:slug/vote-status', async (req: Request, res: Response, next: NextF
  */
 router.post('/:slug/votes', pollVoteLimiter, validate(opinionPollVoteSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await closeDueOpinionPolls();
     const slug = typeof req.params.slug === 'string' ? req.params.slug.trim() : '';
     const requestIp = getOriginalClientIp(req);
     const result = await castAnonymousOpinionPollVote(slug, req.body.optionId, req.body.browserToken, requestIp);
