@@ -7,6 +7,10 @@ function clientIpKey(req: Request) {
   return `ip:${getOriginalClientIp(req)}`;
 }
 
+function isSafeReadRequest(req: Request) {
+  return req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+}
+
 /**
  * Security headers via helmet.
  */
@@ -16,7 +20,8 @@ export const securityHeaders = helmet({
 });
 
 /**
- * General API rate limiter: 100 requests per 15 minutes per IP.
+ * General mutation limiter. Public reads are intentionally excluded: page data
+ * must remain accessible, while edge/WAF controls handle read-volume abuse.
  */
 export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -24,7 +29,8 @@ export const generalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: clientIpKey,
-  message: { error: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' },
+  skip: isSafeReadRequest,
+  message: { error: 'RATE_LIMITED', message: 'Too many write requests. Please try again later.' },
 });
 
 /**
@@ -37,6 +43,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   skipFailedRequests: false,
   keyGenerator: clientIpKey,
+  skip: isSafeReadRequest,
   message: { error: 'RATE_LIMITED', message: 'Too many login attempts. Please try again in 5 minutes.' },
 });
 
@@ -95,6 +102,7 @@ export const volunteerActionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: volunteerAccountKey,
+  skip: isSafeReadRequest,
   message: { error: 'RATE_LIMITED', message: 'Too many account requests. Please wait before trying again.' },
 });
 
@@ -129,6 +137,7 @@ export const adminLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: clientIpKey,
+  skip: isSafeReadRequest,
   message: { error: 'RATE_LIMITED', message: 'Too many administrative requests. Please wait before trying again.' },
 });
 
