@@ -29,6 +29,7 @@ import {
   resetAccountAccess, recordAccountInviteResult,
   getAccountStipendRequests, getAssignmentMobilizerReports,
   getPollingStations, addPollingStation, setPollingStationActive, updatePollingStationApproval,
+  getCandidateRaces, getActiveCandidateRaceByName, createCandidateRace, archiveCandidateRace,
   getElectionCandidates, addElectionCandidate, setElectionCandidateActive,
   archiveElectionCandidate, restoreElectionCandidate,
   deleteElectionCandidate,
@@ -259,6 +260,40 @@ router.post('/polling-stations/:id/review', requireAdmin, async (req: Request, r
   }
 });
 
+// --- Centrally managed candidate races ---
+router.get('/candidate-races', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.json(await getCandidateRaces(req.query.includeInactive === 'true'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/candidate-races', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name || name.length > 120) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Race name is required and must be 120 characters or fewer.');
+    const race = await createCandidateRace(name);
+    logger.info({ raceId: race.id, createdBy: (req as any).user?.username }, 'Candidate race created');
+    return res.status(201).json(race);
+  } catch (err: any) {
+    if (err?.code === 'P2002') return res.status(409).json({ error: ErrorCode.DUPLICATE_REQUEST, message: 'A race with that name already exists.' });
+    next(err);
+  }
+});
+
+router.post('/candidate-races/:id/archive', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await archiveCandidateRace(req.params.id);
+    if (!result) throw new AppError(404, ErrorCode.NOT_FOUND, 'Candidate race not found or cannot be archived.');
+    if ('blocked' in result) return res.status(409).json({ error: ErrorCode.VALIDATION_ERROR, message: `Move or archive ${result.candidateCount} active candidate(s) before archiving this race.` });
+    logger.info({ raceId: result.id, archivedBy: (req as any).user?.username }, 'Candidate race archived');
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // --- Election candidate registry and private polling result review ---
 router.get('/election-candidates', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -275,6 +310,7 @@ router.post('/election-candidates', requireAdmin, async (req: Request, res: Resp
     const race = typeof req.body?.race === 'string' ? req.body.race.trim() : '';
     const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
     if (!name || !race || name.length > 150 || party.length > 150 || race.length > 120 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name and race are required and values must be concise.');
+    if (!await getActiveCandidateRaceByName(race)) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Select an active race from Race Management.');
     if (imageUrl) {
       const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
       const isAbsoluteUrl = (() => {
@@ -302,6 +338,7 @@ router.put('/election-candidates/:id', requireAdmin, async (req: Request, res: R
     const race = typeof req.body?.race === 'string' ? req.body.race.trim() : '';
     const imageUrl = typeof req.body?.imageUrl === 'string' ? req.body.imageUrl.trim() : '';
     if (!name || !race || name.length > 150 || party.length > 150 || race.length > 120 || imageUrl.length > 500) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Candidate name and race are required and values must be concise.');
+    if (!await getActiveCandidateRaceByName(race)) throw new AppError(400, ErrorCode.VALIDATION_ERROR, 'Select an active race from Race Management.');
     if (imageUrl) {
       const isLocalCandidateUpload = /^\/uploads\/candidate-images\/[A-Za-z0-9._/-]+$/.test(imageUrl);
       const isAbsoluteUrl = (() => { try { const url = new URL(imageUrl); return url.protocol === 'https:' || url.protocol === 'http:'; } catch { return false; } })();

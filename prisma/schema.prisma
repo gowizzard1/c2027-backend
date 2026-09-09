@@ -390,6 +390,19 @@ model PollingStation {
   @@index([active, ward])
 }
 
+// Centrally managed candidate-race registry. Candidate records store the race
+// name as a stable grouping key; the admin UI can only select active entries here.
+model CandidateRace {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  active     Boolean  @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([active, name])
+}
+
 // Admin-managed candidate registry for an election reporting period.
 model ElectionCandidate {
   id        String   @id @default(cuid())

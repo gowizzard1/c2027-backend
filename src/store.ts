@@ -1187,6 +1187,29 @@ export async function updatePollingStationApproval(id: string, approvalStatus: '
 }
 
 // ---- Private polling-day result reporting ----
+export async function getCandidateRaces(includeInactive = false) {
+  return prisma.candidateRace.findMany({
+    where: includeInactive ? {} : { active: true, archivedAt: null },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function getActiveCandidateRaceByName(name: string) {
+  return prisma.candidateRace.findFirst({ where: { name: name.trim(), active: true, archivedAt: null } });
+}
+
+export async function createCandidateRace(name: string) {
+  return prisma.candidateRace.create({ data: { name: name.trim() } });
+}
+
+export async function archiveCandidateRace(id: string) {
+  const race = await prisma.candidateRace.findUnique({ where: { id } });
+  if (!race || race.archivedAt || race.name === 'Unassigned') return null;
+  const candidateCount = await prisma.electionCandidate.count({ where: { race: race.name, archivedAt: null } });
+  if (candidateCount > 0) return { blocked: true as const, candidateCount };
+  return prisma.candidateRace.update({ where: { id }, data: { active: false, archivedAt: new Date() } });
+}
+
 export async function getElectionCandidates(includeInactive = false, race?: string) {
   return prisma.electionCandidate.findMany({
     where: {
