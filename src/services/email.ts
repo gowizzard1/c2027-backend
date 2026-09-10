@@ -191,10 +191,10 @@ Thank you again for pledging your support to Isaac Kiptanui Maiywa for MP Turbo 
 Integration is done and donations are now ready. If you would like to support the campaign, please use our official donation page:
 ${params.donationUrl}
 
-Thank you for standing with us. Kongoi mising!
+Kongoi mising!
 
 Kirgit, Kipkeleny Tulwo! 🇰🇪
 — Isaac Kiptanui Maiywa for Turbo 2027`;
-  const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0D0D0D"><div style="background:#0D0D0D;padding:20px;border-radius:12px 12px 0 0"><h2 style="color:#F5C100;margin:0">Isaac Kiptanui Maiywa for MP Turbo 2027</h2></div><div style="border:1px solid #eee;border-top:none;padding:24px;border-radius:0 0 12px 12px"><p>Hi ${safeName},</p><p>Thank you again for pledging your support to <strong>Isaac Kiptanui Maiywa for MP Turbo 2027</strong>.</p><p>Donations are now ready. If you would like to support the campaign, please use our official donation page:</p><p><a href="${safeDonationUrl}" style="display:inline-block;background:#1A7A3C;color:#fff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:8px">Donate to the campaign</a></p><p style="font-size:12px;color:#666">Or paste this link: ${safeDonationUrl}</p><p>Thank you for standing with us.</p><p style="margin-top:24px">Kirgit, Kipkeleny Tulwo! 🇰🇪<br>— Isaac Kiptanui Maiywa for MP Turbo 2027</p></div></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0D0D0D"><div style="background:#0D0D0D;padding:20px;border-radius:12px 12px 0 0"><h2 style="color:#F5C100;margin:0">Isaac Kiptanui Maiywa for MP Turbo 2027</h2></div><div style="border:1px solid #eee;border-top:none;padding:24px;border-radius:0 0 12px 12px"><p>Hi ${safeName},</p><p>Thank you again for pledging your support to <strong>Isaac Kiptanui Maiywa for MP Turbo 2027</strong>.</p><p>Donations are now ready. If you would like to support the campaign, please use our official donation page:</p><p><a href="${safeDonationUrl}" style="display:inline-block;background:#1A7A3C;color:#fff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:8px">Donate to the campaign</a></p><p style="font-size:12px;color:#666">Or paste this link: ${safeDonationUrl}</p><p>Kongoi mising!</p><p style="margin-top:24px">Kirgit, Kipkeleny Tulwo! 🇰🇪<br>— Isaac Kiptanui Maiywa for MP Turbo 2027</p></div></div>`;
   return { ...(await sendEmailDetailed({ to: params.to, subject, text, html })), subject };
 }
