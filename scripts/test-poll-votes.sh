@@ -48,7 +48,7 @@ IFS=$'\t' read -r OPTION_ID BEFORE_TOTAL <<< "$POLL_DETAILS"
 
 for ((index = 1; index <= VOTE_COUNT; index++)); do
   # Documentation-range addresses and unique tokens simulate distinct local test voters.
-  FORWARDED_IP="198.18.9.$index"
+  FORWARDED_IP="198.18.11.$index"
   TOKEN="$(node -e 'console.log(require("crypto").randomBytes(32).toString("base64url"))')"
   STATUS="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --request POST "$BASE_URL/api/polls/$POLL_SLUG/votes" \
